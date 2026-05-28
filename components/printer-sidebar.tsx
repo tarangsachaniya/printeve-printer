@@ -2,9 +2,10 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { LayoutDashboard, Briefcase, User, Package, LogOut } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { logout, getCurrentUser } from '@/lib/auth'
+import { logout, getCurrentUser, type PrinterUser } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 
 const navItems = [
@@ -16,7 +17,11 @@ const navItems = [
 
 export function PrinterSidebar() {
   const pathname = usePathname()
-  const user = getCurrentUser()
+  const [user, setUser] = useState<PrinterUser | null>(null)
+
+  useEffect(() => {
+    setUser(getCurrentUser())
+  }, [])
 
   return (
     <aside className="flex flex-col w-60 shrink-0 border-r bg-card h-screen sticky top-0">
