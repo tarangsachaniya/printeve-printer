@@ -171,15 +171,20 @@ export default function ProductsPage() {
                 key={r.id}
                 type="button"
                 onClick={() => openRequest(r.id)}
-                className="flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+                className="flex w-full flex-col rounded-lg border px-4 py-3 text-left hover:bg-muted/40 transition-colors gap-1"
               >
-                <div>
+                <div className="flex w-full items-center justify-between">
                   <p className="text-sm font-medium">{r.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    ₹{Number(r.base_price).toLocaleString('en-IN')} · {new Date(r.created_at).toLocaleDateString()}
-                  </p>
+                  <Badge variant={statusVariant(r.status)}>{r.status}</Badge>
                 </div>
-                <Badge variant={statusVariant(r.status)}>{r.status}</Badge>
+                <p className="text-xs text-muted-foreground">
+                  ₹{Number(r.base_price).toLocaleString('en-IN')} · {new Date(r.created_at).toLocaleDateString()}
+                </p>
+                {r.status === 'rejected' && r.admin_notes && (
+                  <p className="text-xs text-destructive mt-0.5">
+                    Reason: {r.admin_notes}
+                  </p>
+                )}
               </button>
             ))
           )}
