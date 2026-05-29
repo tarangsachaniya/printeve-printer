@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { PlusIcon } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { PlusIcon, TagIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,12 +16,26 @@ import {
   type ProductRequestPayload,
   type ProductRequestInitial,
 } from '@/components/product-request-form'
+import {
+  PriceRequestForm,
+  type PriceRequestPayload,
+  type PriceRequestInitial,
+} from '@/components/price-request-form'
 
 interface Product {
   id: string
   name: string
   base_price: number
   selected: boolean
+}
+
+interface ProductDetail {
+  id: string
+  name: string
+  base_price: number
+  paper_qualities: { gsm: number; price: number }[]
+  paper_types: { type: string; price: number }[]
+  quantity_tiers: { min_qty: number; max_qty: number | null; unit_price: number }[]
 }
 
 interface ProductRequestListItem {
@@ -39,27 +53,62 @@ interface ProductRequestDetail extends ProductRequestInitial {
   admin_notes?: string | null
 }
 
+interface PriceRequestListItem {
+  id: string
+  product_name: string | null
+  base_price: number
+  current_price: number | null
+  status: 'pending' | 'approved' | 'rejected'
+  admin_notes?: string | null
+  notes?: string | null
+  created_at: string
+}
+
+interface PriceRequestDetail extends PriceRequestInitial {
+  id: string
+  product_id: string | null
+  product_name: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  admin_notes?: string | null
+}
+
 export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [requests, setRequests] = useState<ProductRequestListItem[]>([])
+  const [priceRequests, setPriceRequests] = useState<PriceRequestListItem[]>([])
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
 
+  // --- product request sheet ---
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [requestDetail, setRequestDetail] = useState<ProductRequestDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [saving, setSaving] = useState(false)
+  const detailCache = useRef(new Map<string, ProductRequestDetail>())
+
+  // --- price request sheet ---
+  const [priceSheetOpen, setPriceSheetOpen] = useState(false)
+  const [priceEditingId, setPriceEditingId] = useState<string | null>(null)
+  const [priceRequestDetail, setPriceRequestDetail] = useState<PriceRequestDetail | null>(null)
+  const [priceInitial, setPriceInitial] = useState<PriceRequestInitial | undefined>(undefined)
+  const [priceProductId, setPriceProductId] = useState<string>('')
+  const [priceProductName, setPriceProductName] = useState<string>('')
+  const [loadingPriceDetail, setLoadingPriceDetail] = useState(false)
+  const [savingPrice, setSavingPrice] = useState(false)
+  const priceDetailCache = useRef(new Map<string, PriceRequestDetail>())
 
   function load() {
     setLoading(true)
     Promise.all([
       api.get<{ items: Product[] }>('/printer/products'),
       api.get<{ items: ProductRequestListItem[] }>('/printer/product-requests'),
+      api.get<{ items: PriceRequestListItem[] }>('/printer/product-price-requests'),
     ])
-      .then(([prods, reqs]) => {
+      .then(([prods, reqs, priceReqs]) => {
         setProducts(prods.items ?? [])
         setRequests(reqs.items ?? [])
+        setPriceRequests(priceReqs.items ?? [])
       })
       .catch(err => toast.error(err.message ?? 'Failed to load products'))
       .finally(() => setLoading(false))
@@ -67,6 +116,7 @@ export default function ProductsPage() {
 
   useEffect(() => { load() }, [])
 
+  // ---- product request handlers ----
   function closeSheet() {
     setSheetOpen(false)
     setEditingId(null)
@@ -81,12 +131,15 @@ export default function ProductsPage() {
 
   async function openRequest(id: string) {
     setEditingId(id)
-    setRequestDetail(null)
     setSheetOpen(true)
+    const cached = detailCache.current.get(id)
+    if (cached) { setRequestDetail(cached); return }
+    setRequestDetail(null)
     setLoadingDetail(true)
     try {
       const res = await api.get<{ data: ProductRequestDetail }>(`/printer/product-requests/${id}`)
       setRequestDetail(res.data)
+      detailCache.current.set(id, res.data)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load request')
       closeSheet()
@@ -118,6 +171,7 @@ export default function ProductsPage() {
     try {
       if (editingId) {
         await api.patch(`/printer/product-requests/${editingId}`, data)
+        detailCache.current.delete(editingId)
         toast.success('Request updated')
       } else {
         await api.post('/printer/product-requests', data)
@@ -132,14 +186,111 @@ export default function ProductsPage() {
     }
   }
 
-  const statusVariant = (s: ProductRequestListItem['status']) =>
+  // ---- price request handlers ----
+  function closePriceSheet() {
+    setPriceSheetOpen(false)
+    setPriceEditingId(null)
+    setPriceRequestDetail(null)
+    setPriceInitial(undefined)
+    setPriceProductId('')
+    setPriceProductName('')
+  }
+
+  async function openPriceRequestForProduct(product: Product) {
+    setPriceEditingId(null)
+    setPriceProductId(product.id)
+    setPriceProductName(product.name)
+    setPriceRequestDetail(null)
+    setPriceSheetOpen(true)
+    setLoadingPriceDetail(true)
+    try {
+      const res = await api.get<{ data: ProductDetail }>(`/printer/products/${product.id}`)
+      setPriceInitial({
+        base_price: res.data.base_price,
+        paper_qualities: res.data.paper_qualities,
+        paper_types: res.data.paper_types,
+        quantity_tiers: res.data.quantity_tiers,
+      })
+    } catch {
+      // still usable without pre-fill
+    } finally {
+      setLoadingPriceDetail(false)
+    }
+  }
+
+  async function openPriceRequest(item: PriceRequestListItem) {
+    setPriceEditingId(item.id)
+    setPriceProductId('')
+    setPriceProductName(item.product_name ?? '')
+    setPriceRequestDetail(null)
+    setPriceInitial(undefined)
+    setPriceSheetOpen(true)
+    const cached = priceDetailCache.current.get(item.id)
+    if (cached) {
+      setPriceRequestDetail(cached)
+      setPriceInitial({
+        base_price: cached.base_price,
+        paper_qualities: cached.paper_qualities,
+        paper_types: cached.paper_types,
+        quantity_tiers: cached.quantity_tiers,
+        notes: cached.notes,
+      })
+      if (cached.product_id) setPriceProductId(cached.product_id)
+      return
+    }
+    setLoadingPriceDetail(true)
+    try {
+      const res = await api.get<{ data: PriceRequestDetail }>(`/printer/product-price-requests/${item.id}`)
+      priceDetailCache.current.set(item.id, res.data)
+      setPriceRequestDetail(res.data)
+      setPriceInitial({
+        base_price: res.data.base_price,
+        paper_qualities: res.data.paper_qualities,
+        paper_types: res.data.paper_types,
+        quantity_tiers: res.data.quantity_tiers,
+        notes: res.data.notes,
+      })
+      if (res.data.product_id) setPriceProductId(res.data.product_id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load request')
+      closePriceSheet()
+    } finally {
+      setLoadingPriceDetail(false)
+    }
+  }
+
+  async function handlePriceSubmit(data: PriceRequestPayload) {
+    setSavingPrice(true)
+    try {
+      if (priceEditingId) {
+        await api.patch(`/printer/product-price-requests/${priceEditingId}`, data)
+        priceDetailCache.current.delete(priceEditingId)
+        toast.success('Price request updated')
+      } else {
+        await api.post('/printer/product-price-requests', data)
+        toast.success('Price change request submitted for admin review')
+      }
+      closePriceSheet()
+      load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to save request')
+    } finally {
+      setSavingPrice(false)
+    }
+  }
+
+  const statusVariant = (s: 'pending' | 'approved' | 'rejected') =>
     s === 'approved' ? 'default' : s === 'rejected' ? 'destructive' : 'secondary'
 
   const isNew = !editingId
   const readOnly = requestDetail != null && requestDetail.status !== 'pending'
-  const sheetTitle = isNew
-    ? 'Request new product'
-    : requestDetail?.name ?? 'Product request'
+  const sheetTitle = isNew ? 'Request new product' : requestDetail?.name ?? 'Product request'
+
+  const isPriceNew = !priceEditingId
+  const priceReadOnly = priceRequestDetail != null && priceRequestDetail.status !== 'pending'
+  const priceSheetTitle = isPriceNew
+    ? `Request price change — ${priceProductName}`
+    : priceProductName || 'Price change request'
 
   return (
     <div className="p-6 space-y-8">
@@ -156,6 +307,7 @@ export default function ProductsPage() {
         </Button>
       </div>
 
+      {/* Product requests */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">My product requests</CardTitle>
@@ -181,9 +333,7 @@ export default function ProductsPage() {
                   ₹{Number(r.base_price).toLocaleString('en-IN')} · {new Date(r.created_at).toLocaleDateString()}
                 </p>
                 {r.status === 'rejected' && r.admin_notes && (
-                  <p className="text-xs text-destructive mt-0.5">
-                    Reason: {r.admin_notes}
-                  </p>
+                  <p className="text-xs text-destructive mt-0.5">Reason: {r.admin_notes}</p>
                 )}
               </button>
             ))
@@ -191,6 +341,42 @@ export default function ProductsPage() {
         </CardContent>
       </Card>
 
+      {/* Price change requests */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">My price change requests</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          {loading ? (
+            <Skeleton className="h-12 w-full" />
+          ) : priceRequests.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-2">No price requests yet. Use &ldquo;Request price change&rdquo; on a selected product below.</p>
+          ) : (
+            priceRequests.map(r => (
+              <button
+                key={r.id}
+                type="button"
+                onClick={() => openPriceRequest(r)}
+                className="flex w-full flex-col rounded-lg border px-4 py-3 text-left hover:bg-muted/40 transition-colors gap-1"
+              >
+                <div className="flex w-full items-center justify-between">
+                  <p className="text-sm font-medium">{r.product_name ?? '—'}</p>
+                  <Badge variant={statusVariant(r.status)}>{r.status}</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {r.current_price != null && <>₹{Number(r.current_price).toLocaleString('en-IN')} → </>}
+                  ₹{Number(r.base_price).toLocaleString('en-IN')} · {new Date(r.created_at).toLocaleDateString()}
+                </p>
+                {r.status === 'rejected' && r.admin_notes && (
+                  <p className="text-xs text-destructive mt-0.5">Reason: {r.admin_notes}</p>
+                )}
+              </button>
+            ))
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Catalog */}
       <div className="space-y-2">
         <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Catalog</h2>
         {loading ? (
@@ -215,7 +401,17 @@ export default function ProductsPage() {
                     Base price: ₹{product.base_price?.toLocaleString('en-IN')}
                   </p>
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2">
+                  {product.selected && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => openPriceRequestForProduct(product)}
+                    >
+                      <TagIcon className="h-3.5 w-3.5 mr-1" />
+                      Request price change
+                    </Button>
+                  )}
                   {product.selected && <Badge variant="default">Selected</Badge>}
                   <Button
                     size="sm"
@@ -232,6 +428,7 @@ export default function ProductsPage() {
         )}
       </div>
 
+      {/* Product request sheet */}
       <Sheet open={sheetOpen} onOpenChange={open => { if (!open) closeSheet() }}>
         <SheetContent side="right" className="!w-[50vw] !max-w-none flex flex-col h-full p-0">
           <SheetHeader className="px-6 pt-5 pb-4 border-b shrink-0">
@@ -270,13 +467,55 @@ export default function ProductsPage() {
               <Button type="button" variant="outline" className="flex-1" onClick={closeSheet} disabled={saving}>
                 Cancel
               </Button>
-              <Button
-                type="submit"
-                form="product-request-form"
-                className="flex-1"
-                disabled={saving}
-              >
+              <Button type="submit" form="product-request-form" className="flex-1" disabled={saving}>
                 {saving ? 'Saving…' : isNew ? 'Submit for review' : 'Save changes'}
+              </Button>
+            </SheetFooter>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* Price request sheet */}
+      <Sheet open={priceSheetOpen} onOpenChange={open => { if (!open) closePriceSheet() }}>
+        <SheetContent side="right" className="!w-[50vw] !max-w-none flex flex-col h-full p-0">
+          <SheetHeader className="px-6 pt-5 pb-4 border-b shrink-0">
+            <div className="flex items-center gap-2 pr-8">
+              <SheetTitle>{priceSheetTitle}</SheetTitle>
+              {priceRequestDetail && (
+                <Badge variant={statusVariant(priceRequestDetail.status)}>{priceRequestDetail.status}</Badge>
+              )}
+            </div>
+            {priceRequestDetail?.admin_notes && priceRequestDetail.status === 'rejected' && (
+              <p className="text-sm text-destructive mt-1">Admin note: {priceRequestDetail.admin_notes}</p>
+            )}
+            {isPriceNew && (
+              <p className="text-sm text-muted-foreground">Propose new pricing for admin approval. Fields are pre-filled with current values.</p>
+            )}
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto px-6 py-5">
+            {loadingPriceDetail ? (
+              <p className="text-muted-foreground">Loading…</p>
+            ) : (
+              <PriceRequestForm
+                key={priceEditingId ?? `new-${priceProductId}`}
+                productId={priceProductId}
+                initial={priceInitial}
+                readOnly={priceReadOnly}
+                onSubmit={priceReadOnly ? undefined : handlePriceSubmit}
+                saving={savingPrice}
+                hideSubmit
+              />
+            )}
+          </div>
+
+          {!priceReadOnly && !loadingPriceDetail && (
+            <SheetFooter className="px-6 py-4 border-t shrink-0 flex-row gap-2">
+              <Button type="button" variant="outline" className="flex-1" onClick={closePriceSheet} disabled={savingPrice}>
+                Cancel
+              </Button>
+              <Button type="submit" form="price-request-form" className="flex-1" disabled={savingPrice}>
+                {savingPrice ? 'Saving…' : isPriceNew ? 'Submit for review' : 'Save changes'}
               </Button>
             </SheetFooter>
           )}
