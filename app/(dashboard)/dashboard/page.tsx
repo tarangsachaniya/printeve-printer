@@ -69,16 +69,16 @@ export default function DashboardPage() {
       {setupIncomplete && (
         <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/30">
           <div>
-            <p className="font-medium text-amber-900 dark:text-amber-200">Complete your shop setup</p>
+            <p className="font-medium text-amber-900 dark:text-amber-200">Complete your shop profile</p>
             <p className="text-amber-700 dark:text-amber-400 text-xs mt-0.5">
               Add your location and bank details to start receiving orders.
             </p>
           </div>
           <Link
-            href="/setup"
+            href="/profile"
             className="ml-4 shrink-0 rounded-md bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 transition-colors"
           >
-            Complete Setup →
+            Go to Profile →
           </Link>
         </div>
       )}
