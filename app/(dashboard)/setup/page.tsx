@@ -73,10 +73,8 @@ export default function SetupPage() {
   const [upiId, setUpiId] = useState('')
 
   useEffect(() => {
-    // Fetch legal terms (public endpoint, no auth needed)
-    fetch(`${process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3032'}/printer/legal`)
-      .then(r => r.json())
-      .then((d: { value: string }) => setLegalHtml(d.value ?? ''))
+    api.get<{ value: string }>('/printer/legal')
+      .then(d => setLegalHtml(d.value ?? ''))
       .catch(() => setLegalHtml(''))
       .finally(() => setLegalLoading(false))
 
