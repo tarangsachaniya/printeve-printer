@@ -16,19 +16,19 @@ interface Product {
 const TOTAL_STEPS = 5
 
 const STEP_TITLES = [
-  'Legal Agreement',
   'Change Password',
   'Shop Location',
   'Product Configuration',
   'Bank Details',
+  'Legal Agreement',
 ]
 
 const STEP_DESCRIPTIONS = [
-  'Read and sign the terms to activate your printer account.',
   'Set a secure password for your account.',
   'Add your shop address so customers can find you.',
   'Select the products your shop can print.',
   'Add your bank details to receive payouts.',
+  'Read and sign the terms to activate your printer account.',
 ]
 
 // ─── Main Page ──────────────────────────────────────────────────────────────
@@ -97,10 +97,6 @@ export default function SetupPage() {
     setSaving(true)
     try {
       if (step === 0) {
-        // Agreement — save signature
-        const signature_data = getSignatureDataUrl()
-        await api.patch('/printer/profile/agreement', { signature_data })
-      } else if (step === 1) {
         if (!oldPassword || !newPassword || !confirmPassword) {
           setError('All password fields are required.')
           return
@@ -114,7 +110,7 @@ export default function SetupPage() {
           return
         }
         await api.patch('/printer/profile/password', { old_password: oldPassword, new_password: newPassword })
-      } else if (step === 2) {
+      } else if (step === 1) {
         if (!address || !city || !pincode) {
           setError('Address, city, and pincode are required.')
           return
@@ -124,9 +120,9 @@ export default function SetupPage() {
           latitude: latitude ? parseFloat(latitude) : undefined,
           longitude: longitude ? parseFloat(longitude) : undefined,
         })
-      } else if (step === 3) {
+      } else if (step === 2) {
         await api.patch('/printer/profile/products', { product_ids: selectedProducts })
-      } else if (step === 4) {
+      } else if (step === 3) {
         if (!accountHolder || !bankName || !accountNumber || !ifscCode) {
           setError('All bank fields except UPI are required.')
           return
@@ -138,6 +134,10 @@ export default function SetupPage() {
           ifsc_code: ifscCode,
           upi_id: upiId || undefined,
         })
+      } else if (step === 4) {
+        // Agreement — save signature (last step, mandatory)
+        const signature_data = getSignatureDataUrl()
+        await api.patch('/printer/profile/agreement', { signature_data })
         router.push('/dashboard')
         return
       }
@@ -161,7 +161,7 @@ export default function SetupPage() {
     else router.push('/dashboard')
   }
 
-  const canProceed = step === 0 ? agreed && signed : true
+  const canProceed = step === 4 ? agreed && signed : true
 
   return (
     <div className="min-h-screen bg-muted/20 flex items-center justify-center p-4">
@@ -185,8 +185,112 @@ export default function SetupPage() {
             <p className="text-sm text-muted-foreground">{STEP_DESCRIPTIONS[step]}</p>
           </div>
 
-          {/* ── Step 0: Legal Terms ── */}
+          {/* ── Step 0: Password ── */}
           {step === 0 && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label>Current Password</Label>
+                <Input type="password" value={oldPassword} onChange={e => setOldPassword(e.target.value)} placeholder="••••••••" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>New Password</Label>
+                <Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 6 characters" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Confirm New Password</Label>
+                <Input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat new password" />
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 1: Location ── */}
+          {step === 1 && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label>Street Address <span className="text-destructive">*</span></Label>
+                <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Shop no., building, street" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>City <span className="text-destructive">*</span></Label>
+                  <Input value={city} onChange={e => setCity(e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Pincode <span className="text-destructive">*</span></Label>
+                  <Input value={pincode} onChange={e => setPincode(e.target.value)} placeholder="400001" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label>Latitude <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                  <Input type="number" value={latitude} onChange={e => setLatitude(e.target.value)} placeholder="18.9750" />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Longitude <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                  <Input type="number" value={longitude} onChange={e => setLongitude(e.target.value)} placeholder="72.8258" />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 2: Products ── */}
+          {step === 2 && (
+            <div className="space-y-3">
+              {products.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No products available yet. You can configure this later.</p>
+              ) : (
+                <div className="rounded-md border divide-y max-h-72 overflow-y-auto">
+                  {products.map(p => (
+                    <label
+                      key={p.id}
+                      className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedProducts.includes(p.id)}
+                        onChange={() => toggleProduct(p.id)}
+                        className="h-4 w-4 rounded border-input accent-primary cursor-pointer shrink-0"
+                      />
+                      <span className="text-sm font-medium flex-1">{p.name}</span>
+                      <span className="text-sm text-muted-foreground">₹{p.base_price?.toLocaleString('en-IN')}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">
+                {selectedProducts.length} product{selectedProducts.length !== 1 ? 's' : ''} selected
+              </p>
+            </div>
+          )}
+
+          {/* ── Step 3: Bank ── */}
+          {step === 3 && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label>Account Holder Name <span className="text-destructive">*</span></Label>
+                <Input value={accountHolder} onChange={e => setAccountHolder(e.target.value)} placeholder="Full name as per bank" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Bank Name <span className="text-destructive">*</span></Label>
+                <Input value={bankName} onChange={e => setBankName(e.target.value)} placeholder="State Bank of India" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Account Number <span className="text-destructive">*</span></Label>
+                <Input value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="000123456789" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>IFSC Code <span className="text-destructive">*</span></Label>
+                <Input value={ifscCode} onChange={e => setIfscCode(e.target.value)} placeholder="SBIN0001234" className="uppercase" />
+              </div>
+              <div className="space-y-1.5">
+                <Label>UPI ID <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                <Input value={upiId} onChange={e => setUpiId(e.target.value)} placeholder="yourname@upi" />
+              </div>
+            </div>
+          )}
+
+          {/* ── Step 4: Legal Terms + E-Sign ── */}
+          {step === 4 && (
             <div className="space-y-5">
               {legalLoading ? (
                 <div className="h-48 rounded-lg border bg-muted animate-pulse" />
@@ -222,110 +326,6 @@ export default function SetupPage() {
             </div>
           )}
 
-          {/* ── Step 1: Password ── */}
-          {step === 1 && (
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>Current Password</Label>
-                <Input type="password" value={oldPassword} onChange={e => setOldPassword(e.target.value)} placeholder="••••••••" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>New Password</Label>
-                <Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 6 characters" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Confirm New Password</Label>
-                <Input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat new password" />
-              </div>
-            </div>
-          )}
-
-          {/* ── Step 2: Location ── */}
-          {step === 2 && (
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>Street Address <span className="text-destructive">*</span></Label>
-                <Input value={address} onChange={e => setAddress(e.target.value)} placeholder="Shop no., building, street" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>City <span className="text-destructive">*</span></Label>
-                  <Input value={city} onChange={e => setCity(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Pincode <span className="text-destructive">*</span></Label>
-                  <Input value={pincode} onChange={e => setPincode(e.target.value)} placeholder="400001" />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Latitude <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                  <Input type="number" value={latitude} onChange={e => setLatitude(e.target.value)} placeholder="18.9750" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Longitude <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                  <Input type="number" value={longitude} onChange={e => setLongitude(e.target.value)} placeholder="72.8258" />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Step 3: Products ── */}
-          {step === 3 && (
-            <div className="space-y-3">
-              {products.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No products available yet. You can configure this later.</p>
-              ) : (
-                <div className="rounded-md border divide-y max-h-72 overflow-y-auto">
-                  {products.map(p => (
-                    <label
-                      key={p.id}
-                      className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-muted/40 transition-colors"
-                    >
-                      <input
-                        type="checkbox"
-                        checked={selectedProducts.includes(p.id)}
-                        onChange={() => toggleProduct(p.id)}
-                        className="h-4 w-4 rounded border-input accent-primary cursor-pointer shrink-0"
-                      />
-                      <span className="text-sm font-medium flex-1">{p.name}</span>
-                      <span className="text-sm text-muted-foreground">₹{p.base_price?.toLocaleString('en-IN')}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-              <p className="text-xs text-muted-foreground">
-                {selectedProducts.length} product{selectedProducts.length !== 1 ? 's' : ''} selected
-              </p>
-            </div>
-          )}
-
-          {/* ── Step 4: Bank ── */}
-          {step === 4 && (
-            <div className="space-y-4">
-              <div className="space-y-1.5">
-                <Label>Account Holder Name <span className="text-destructive">*</span></Label>
-                <Input value={accountHolder} onChange={e => setAccountHolder(e.target.value)} placeholder="Full name as per bank" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Bank Name <span className="text-destructive">*</span></Label>
-                <Input value={bankName} onChange={e => setBankName(e.target.value)} placeholder="State Bank of India" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Account Number <span className="text-destructive">*</span></Label>
-                <Input value={accountNumber} onChange={e => setAccountNumber(e.target.value)} placeholder="000123456789" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>IFSC Code <span className="text-destructive">*</span></Label>
-                <Input value={ifscCode} onChange={e => setIfscCode(e.target.value)} placeholder="SBIN0001234" className="uppercase" />
-              </div>
-              <div className="space-y-1.5">
-                <Label>UPI ID <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                <Input value={upiId} onChange={e => setUpiId(e.target.value)} placeholder="yourname@upi" />
-              </div>
-            </div>
-          )}
-
           {error && <p className="text-sm text-destructive">{error}</p>}
 
           {/* Actions */}
@@ -338,16 +338,14 @@ export default function SetupPage() {
             <Button onClick={handleNext} disabled={saving || !canProceed} className="flex-1">
               {saving
                 ? 'Saving…'
-                : step === 0
-                  ? 'Agree & Continue'
-                  : step === TOTAL_STEPS - 1
-                    ? 'Finish Setup'
-                    : 'Next'}
+                : step === TOTAL_STEPS - 1
+                  ? 'Sign & Finish'
+                  : 'Next'}
             </Button>
           </div>
 
-          {/* Skip — not available on step 0 (agreement is mandatory) */}
-          {step > 0 && step < TOTAL_STEPS - 1 && (
+          {/* Skip — not available on last step (agreement is mandatory) */}
+          {step < TOTAL_STEPS - 1 && (
             <button
               onClick={handleSkip}
               className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
