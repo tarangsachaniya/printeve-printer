@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -34,20 +35,17 @@ export default function JobsPage() {
   const router = useRouter()
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
 
   useEffect(() => {
     api.get<JobsResponse>('/printer/jobs')
       .then((res) => setJobs(res.items ?? []))
-      .catch((err) => setError(err.message))
+      .catch((err) => toast.error(err.message ?? 'Failed to load jobs'))
       .finally(() => setLoading(false))
   }, [])
 
   return (
     <div className="p-6 space-y-4">
       <h1 className="text-2xl font-bold">My Jobs</h1>
-
-      {error && <p className="text-sm text-destructive">{error}</p>}
 
       {loading ? (
         <div className="space-y-2">

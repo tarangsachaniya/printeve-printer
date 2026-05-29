@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -56,7 +57,6 @@ export default function JobDetailPage() {
   const [newStatus, setNewStatus] = useState('')
   const [proofUrl, setProofUrl] = useState('')
   const [updating, setUpdating] = useState(false)
-  const [updateMsg, setUpdateMsg] = useState('')
 
   useEffect(() => {
     api.get<JobDetail>(`/printer/jobs/${id}`)
@@ -64,23 +64,22 @@ export default function JobDetailPage() {
         setJob(res)
         setNewStatus(res.status)
       })
-      .catch((err) => setError(err.message))
+      .catch((err) => setError(err.message ?? 'Failed to load job'))
       .finally(() => setLoading(false))
   }, [id])
 
-  async function handleUpdateStatus(e: React.FormEvent) {
+  async function handleUpdateStatus(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setUpdating(true)
-    setUpdateMsg('')
     try {
       await api.patch(`/printer/status/${id}`, {
         status: newStatus,
         ...(proofUrl ? { proofUrl } : {}),
       })
       setJob((prev) => prev ? { ...prev, status: newStatus } : prev)
-      setUpdateMsg('Status updated successfully.')
+      toast.success('Status updated')
     } catch (err) {
-      setUpdateMsg(err instanceof Error ? err.message : 'Update failed')
+      toast.error(err instanceof Error ? err.message : 'Update failed')
     } finally {
       setUpdating(false)
     }
@@ -231,12 +230,6 @@ export default function JobDetailPage() {
                 onChange={(e) => setProofUrl(e.target.value)}
               />
             </div>
-
-            {updateMsg && (
-              <p className={`text-sm ${updateMsg.includes('success') ? 'text-green-600' : 'text-destructive'}`}>
-                {updateMsg}
-              </p>
-            )}
 
             <Button type="submit" disabled={updating || newStatus === job.status}>
               {updating ? 'Updating…' : 'Update Status'}

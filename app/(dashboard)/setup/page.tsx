@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
+import { validatePassword } from '@/lib/password'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -57,6 +58,8 @@ export default function SetupPage() {
   const [pincode, setPincode] = useState('')
   const [latitude, setLatitude] = useState('')
   const [longitude, setLongitude] = useState('')
+  const [area, setArea] = useState('')
+  const [locating, setLocating] = useState(false)
 
   // Step 3 — Products
   const [products, setProducts] = useState<Product[]>([])
@@ -88,6 +91,25 @@ export default function SetupPage() {
     )
   }
 
+  function useCurrentLocation() {
+    if (!navigator.geolocation) {
+      setError('Geolocation is not supported by your browser.')
+      return
+    }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLatitude(pos.coords.latitude.toFixed(6))
+        setLongitude(pos.coords.longitude.toFixed(6))
+        setLocating(false)
+      },
+      () => {
+        setError('Could not get your location. Please allow location access or enter coordinates manually.')
+        setLocating(false)
+      }
+    )
+  }
+
   function getSignatureDataUrl(): string {
     return canvasRef.current?.toDataURL('image/png') ?? ''
   }
@@ -105,10 +127,8 @@ export default function SetupPage() {
           setError('New passwords do not match.')
           return
         }
-        if (newPassword.length < 6) {
-          setError('Password must be at least 6 characters.')
-          return
-        }
+        const pwErr = validatePassword(newPassword)
+        if (pwErr) { setError(pwErr); return }
         await api.patch('/printer/profile/password', { old_password: oldPassword, new_password: newPassword })
       } else if (step === 1) {
         if (!address || !city || !pincode) {
@@ -120,8 +140,12 @@ export default function SetupPage() {
           latitude: latitude ? parseFloat(latitude) : undefined,
           longitude: longitude ? parseFloat(longitude) : undefined,
         })
+        if (area.trim()) {
+          await api.patch('/printer/profile/about', { area: area.trim() })
+        }
       } else if (step === 2) {
-        await api.patch('/printer/profile/products', { product_ids: selectedProducts })
+        if (selectedProducts.length > 0)
+          await api.patch('/printer/profile/products', { product_ids: selectedProducts })
       } else if (step === 3) {
         if (!accountHolder || !bankName || !accountNumber || !ifscCode) {
           setError('All bank fields except UPI are required.')
@@ -148,7 +172,7 @@ export default function SetupPage() {
       setSaving(false)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, oldPassword, newPassword, confirmPassword, address, city, pincode, latitude, longitude, selectedProducts, accountHolder, bankName, accountNumber, ifscCode, upiId])
+  }, [step, oldPassword, newPassword, confirmPassword, address, city, pincode, latitude, longitude, area, selectedProducts, accountHolder, bankName, accountNumber, ifscCode, upiId])
 
   function handleBack() {
     setError('')
@@ -194,7 +218,7 @@ export default function SetupPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>New Password</Label>
-                <Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 6 characters" />
+                <Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 8 chars, uppercase, number, symbol" />
               </div>
               <div className="space-y-1.5">
                 <Label>Confirm New Password</Label>
@@ -220,14 +244,32 @@ export default function SetupPage() {
                   <Input value={pincode} onChange={e => setPincode(e.target.value)} placeholder="400001" />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <Label>Latitude <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                  <Input type="number" value={latitude} onChange={e => setLatitude(e.target.value)} placeholder="18.9750" />
+              <div className="space-y-1.5">
+                <Label>Locality <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                <Input
+                  value={area}
+                  onChange={e => setArea(e.target.value)}
+                  placeholder="e.g. Koramangala, MG Road, Sector 15"
+                />
+                <p className="text-xs text-muted-foreground">Street, locality, or neighbourhood of your shop</p>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <Label>
+                    Coordinates <span className="text-muted-foreground text-xs">(optional)</span>
+                  </Label>
+                  <button
+                    type="button"
+                    onClick={useCurrentLocation}
+                    disabled={locating}
+                    className="text-xs text-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {locating ? 'Locating…' : '⊕ Use current location'}
+                  </button>
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Longitude <span className="text-muted-foreground text-xs">(optional)</span></Label>
-                  <Input type="number" value={longitude} onChange={e => setLongitude(e.target.value)} placeholder="72.8258" />
+                <div className="grid grid-cols-2 gap-3">
+                  <Input type="number" value={latitude} onChange={e => setLatitude(e.target.value)} placeholder="Latitude (e.g. 18.9750)" />
+                  <Input type="number" value={longitude} onChange={e => setLongitude(e.target.value)} placeholder="Longitude (e.g. 72.8258)" />
                 </div>
               </div>
             </div>
@@ -258,7 +300,9 @@ export default function SetupPage() {
                 </div>
               )}
               <p className="text-xs text-muted-foreground">
-                {selectedProducts.length} product{selectedProducts.length !== 1 ? 's' : ''} selected
+                {selectedProducts.length > 0
+                  ? `${selectedProducts.length} product${selectedProducts.length !== 1 ? 's' : ''} selected`
+                  : 'None selected — you can add products later from the Products page.'}
               </p>
             </div>
           )}

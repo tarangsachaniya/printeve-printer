@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -121,7 +122,7 @@ export default function ProfilePage() {
         setAreaInput(res.data.area ?? '')
         descEditor?.commands.setContent(res.data.description ?? '')
       })
-      .catch(() => {})
+      .catch((err) => toast.error(err.message ?? 'Failed to load profile'))
       .finally(() => setLoading(false))
   }, [descEditor])
 
@@ -136,8 +137,10 @@ export default function ProfilePage() {
       setAboutSaved(true)
       setAboutEdit(false)
       setTimeout(() => setAboutSaved(false), 2000)
-    } catch { /* no-op */ }
-    finally { setAboutSaving(false) }
+      toast.success('About updated')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update about')
+    } finally { setAboutSaving(false) }
   }
 
   const location = profile?.printer_locations?.[0] ?? null

@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -22,7 +23,7 @@ export default function ProductsPage() {
   useEffect(() => {
     api.get<{ items: Product[] }>('/printer/products')
       .then((res) => setProducts(res.items))
-      .catch(() => {})
+      .catch((err) => toast.error(err.message ?? 'Failed to load products'))
       .finally(() => setLoading(false))
   }, [])
 
@@ -37,8 +38,8 @@ export default function ProductsPage() {
       setProducts((prev) =>
         prev.map((p) => (p.id === product.id ? { ...p, selected: !p.selected } : p))
       )
-    } catch {
-      // leave state unchanged on error
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update product')
     } finally {
       setToggling(null)
     }

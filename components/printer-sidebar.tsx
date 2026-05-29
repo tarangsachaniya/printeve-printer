@@ -24,7 +24,7 @@ export function PrinterSidebar() {
   }, [])
 
   return (
-    <aside className="flex flex-col w-60 shrink-0 border-r bg-card h-screen sticky top-0">
+    <aside className="flex flex-col w-60 shrink-0 border-r bg-sidebar h-screen sticky top-0">
       <div className="flex items-center h-16 px-6 border-b">
         <span className="font-bold text-lg tracking-tight">PrintVana</span>
         <span className="ml-2 text-xs text-muted-foreground">Printer</span>
