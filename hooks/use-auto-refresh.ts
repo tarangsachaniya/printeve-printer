@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 const THIRTY_MINUTES = 30 * 60 * 1000
 
-export function useAutoRefresh(fetcher: () => Promise<void>, interval = THIRTY_MINUTES) {
+export function useAutoRefresh(fetcher: () => void, interval = THIRTY_MINUTES) {
   const [refreshing, setRefreshing] = useState(false)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const fetcherRef = useRef(fetcher)

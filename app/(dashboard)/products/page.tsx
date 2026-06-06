@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { PlusIcon, TagIcon } from 'lucide-react'
+import { PlusIcon, TagIcon, MapPinIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,6 +27,17 @@ interface Product {
   name: string
   base_price: number
   selected: boolean
+}
+
+interface CityPricingItem {
+  id: string
+  city_id: string | null
+  city_name: string | null
+  city_state: string | null
+  base_price: number | null
+  paper_qualities: { gsm: number; price: number }[]
+  paper_types: { type: string; price: number }[]
+  quantity_tiers: { min_qty: number; max_qty: number | null; unit_price: number }[]
 }
 
 interface ProductDetail {
@@ -87,6 +98,12 @@ export default function ProductsPage() {
   const [saving, setSaving] = useState(false)
   const detailCache = useRef(new Map<string, ProductRequestDetail>())
 
+  // --- city pricing sheet ---
+  const [citySheetOpen, setCitySheetOpen] = useState(false)
+  const [citySheetProduct, setCitySheetProduct] = useState<Product | null>(null)
+  const [cityPricingItems, setCityPricingItems] = useState<CityPricingItem[]>([])
+  const [loadingCityPricing, setLoadingCityPricing] = useState(false)
+
   // --- price request sheet ---
   const [priceSheetOpen, setPriceSheetOpen] = useState(false)
   const [priceEditingId, setPriceEditingId] = useState<string | null>(null)
@@ -115,6 +132,22 @@ export default function ProductsPage() {
   }
 
   useEffect(() => { load() }, [])
+
+  // ---- city pricing handlers ----
+  async function openCityPricing(product: Product) {
+    setCitySheetProduct(product)
+    setCityPricingItems([])
+    setCitySheetOpen(true)
+    setLoadingCityPricing(true)
+    try {
+      const res = await api.get<{ items: CityPricingItem[] }>(`/printer/products/${product.id}/city-pricing`)
+      setCityPricingItems(res.items ?? [])
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load city pricing')
+    } finally {
+      setLoadingCityPricing(false)
+    }
+  }
 
   // ---- product request handlers ----
   function closeSheet() {
@@ -406,6 +439,16 @@ export default function ProductsPage() {
                     <Button
                       size="sm"
                       variant="outline"
+                      onClick={() => openCityPricing(product)}
+                    >
+                      <MapPinIcon className="h-3.5 w-3.5 mr-1" />
+                      City pricing
+                    </Button>
+                  )}
+                  {product.selected && (
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={() => openPriceRequestForProduct(product)}
                     >
                       <TagIcon className="h-3.5 w-3.5 mr-1" />
@@ -519,6 +562,69 @@ export default function ProductsPage() {
               </Button>
             </SheetFooter>
           )}
+        </SheetContent>
+      </Sheet>
+
+      {/* City pricing sheet */}
+      <Sheet open={citySheetOpen} onOpenChange={open => { if (!open) setCitySheetOpen(false) }}>
+        <SheetContent side="right" className="!w-[480px] !max-w-none flex flex-col h-full p-0">
+          <SheetHeader className="px-6 pt-5 pb-4 border-b shrink-0">
+            <SheetTitle className="flex items-center gap-2">
+              <MapPinIcon className="h-4 w-4 text-muted-foreground" />
+              City pricing — {citySheetProduct?.name}
+            </SheetTitle>
+            <p className="text-sm text-muted-foreground">
+              City-specific price overrides configured by admin.
+            </p>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto px-6 py-5">
+            {loadingCityPricing ? (
+              <div className="space-y-3">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <Skeleton key={i} className="h-14 rounded-lg" />
+                ))}
+              </div>
+            ) : cityPricingItems.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                No city-specific pricing configured for this product.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {cityPricingItems.map(item => (
+                  <div key={item.id} className="rounded-lg border px-4 py-3 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">{item.city_name}</p>
+                      <Badge variant="outline" className="text-xs">{item.city_state}</Badge>
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      Base price:{' '}
+                      {item.base_price != null
+                        ? <span className="font-medium text-foreground">₹{Number(item.base_price).toLocaleString('en-IN')}</span>
+                        : <span className="italic">Same as default</span>
+                      }
+                    </p>
+                    {item.paper_qualities.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Paper qualities: {item.paper_qualities.map(q => `${q.gsm}gsm`).join(', ')}
+                      </p>
+                    )}
+                    {item.quantity_tiers.length > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Quantity tiers: {item.quantity_tiers.length} tier{item.quantity_tiers.length !== 1 ? 's' : ''}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <SheetFooter className="px-6 py-4 border-t shrink-0">
+            <Button variant="outline" className="w-full" onClick={() => setCitySheetOpen(false)}>
+              Close
+            </Button>
+          </SheetFooter>
         </SheetContent>
       </Sheet>
     </div>
