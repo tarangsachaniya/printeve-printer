@@ -10,6 +10,8 @@ import {
   Table, TableBody, TableCell, TableHead,
   TableHeader, TableRow,
 } from '@/components/ui/table'
+import { RefreshButton } from '@/components/refresh-button'
+import { useAutoRefresh } from '@/hooks/use-auto-refresh'
 
 interface Job {
   id: string
@@ -41,20 +43,25 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [setupIncomplete, setSetupIncomplete] = useState(false)
 
-  useEffect(() => {
-    api.get<JobsResponse>('/printer/jobs')
-      .then((res) => setJobs(res.items ?? []))
-      .catch(() => {})
-      .finally(() => setLoading(false))
+  function fetchAll(silent = false) {
+    if (!silent) setLoading(true)
+    return Promise.all([
+      api.get<JobsResponse>('/printer/jobs')
+        .then((res) => setJobs(res.items ?? []))
+        .catch(() => {}),
+      api.get<{ data: ProfileData }>('/printer/profile')
+        .then((res) => {
+          const hasLocation = (res.data.printer_locations?.length ?? 0) > 0
+          const hasBank = !!res.data.printer_bank_details
+          setSetupIncomplete(!hasLocation || !hasBank)
+        })
+        .catch(() => {}),
+    ]).finally(() => { if (!silent) setLoading(false) })
+  }
 
-    api.get<{ data: ProfileData }>('/printer/profile')
-      .then((res) => {
-        const hasLocation = (res.data.printer_locations?.length ?? 0) > 0
-        const hasBank = !!res.data.printer_bank_details
-        setSetupIncomplete(!hasLocation || !hasBank)
-      })
-      .catch(() => {})
-  }, [])
+  useEffect(() => { fetchAll() }, [])
+
+  const { refresh, lastRefreshed, refreshing } = useAutoRefresh(() => fetchAll(true))
 
   const total     = jobs.length
   const pending   = jobs.filter((j) => j.status === 'pending').length
@@ -64,7 +71,10 @@ export default function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">Dashboard</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Dashboard</h1>
+        <RefreshButton onRefresh={refresh} lastRefreshed={lastRefreshed} refreshing={refreshing} />
+      </div>
 
       {setupIncomplete && (
         <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm dark:border-amber-800 dark:bg-amber-950/30">

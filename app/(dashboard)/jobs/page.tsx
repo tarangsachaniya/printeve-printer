@@ -10,6 +10,8 @@ import {
   Table, TableBody, TableCell, TableHead,
   TableHeader, TableRow,
 } from '@/components/ui/table'
+import { RefreshButton } from '@/components/refresh-button'
+import { useAutoRefresh } from '@/hooks/use-auto-refresh'
 
 interface Job {
   id: string
@@ -36,16 +38,24 @@ export default function JobsPage() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    api.get<JobsResponse>('/printer/jobs')
+  function fetchJobs(silent = false) {
+    if (!silent) setLoading(true)
+    return api.get<JobsResponse>('/printer/jobs')
       .then((res) => setJobs(res.items ?? []))
       .catch((err) => toast.error(err.message ?? 'Failed to load jobs'))
-      .finally(() => setLoading(false))
-  }, [])
+      .finally(() => { if (!silent) setLoading(false) })
+  }
+
+  useEffect(() => { fetchJobs() }, [])
+
+  const { refresh, lastRefreshed, refreshing } = useAutoRefresh(() => fetchJobs(true))
 
   return (
     <div className="p-6 space-y-4">
-      <h1 className="text-2xl font-bold">My Jobs</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">My Jobs</h1>
+        <RefreshButton onRefresh={refresh} lastRefreshed={lastRefreshed} refreshing={refreshing} />
+      </div>
 
       {loading ? (
         <div className="space-y-2">
