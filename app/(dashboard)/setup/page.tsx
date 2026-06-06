@@ -40,7 +40,7 @@ export default function SetupPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
-  // Step 0 — Legal
+  // Step 0 — Password
   const [legalHtml, setLegalHtml] = useState('')
   const [legalLoading, setLegalLoading] = useState(true)
   const [agreed, setAgreed] = useState(false)
@@ -387,7 +387,7 @@ export default function SetupPage() {
           </div>
 
           {/* Skip — not available on last step (agreement is mandatory) */}
-          {step < TOTAL_STEPS - 1 && (
+          {step === 0 && (
             <button
               onClick={handleSkip}
               className="w-full text-center text-xs text-muted-foreground hover:text-foreground transition-colors"
