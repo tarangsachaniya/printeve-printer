@@ -13,14 +13,21 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 
+export interface VariantOptionEntry { id: string; price_modifier: number }
+export interface QuantitySlabEntry {
+  min_qty: number
+  max_qty: number | null
+  unit_price: number
+  max_completion_minutes: number | null
+}
+
 export interface ProductRequestPayload {
   name: string
   base_price: number
   description: string | null
-  paper_sizes: string[]
-  paper_qualities: { gsm: number; price: number }[]
-  paper_types: { type: string; price: number }[]
-  quantity_tiers: { min_qty: number; max_qty: number | null; unit_price: number }[]
+  paper_sizes: { paper_size_id: string; price_modifier: number }[]
+  paper_types: { paper_type_id: string; price_modifier: number }[]
+  quantity_slabs: QuantitySlabEntry[]
   images: string[]
   video_url: string | null
 }
@@ -29,21 +36,19 @@ export interface ProductRequestInitial {
   name?: string
   base_price?: number
   description?: string | null
-  paper_sizes?: string[]
-  paper_qualities?: { gsm: number; price: number }[]
-  paper_types?: { type: string; price: number }[]
-  quantity_tiers?: { min_qty: number; max_qty: number | null; unit_price: number }[]
+  paper_sizes?: { paper_size_id: string; price_modifier: number; name?: string }[]
+  paper_types?: { paper_type_id: string; price_modifier: number; name?: string }[]
+  quantity_slabs?: QuantitySlabEntry[]
   images?: string[]
   video_url?: string | null
 }
 
 interface PaperSize { id: string; name: string }
-interface PaperQualityOption { id: string; gsm: number; label: string | null }
 interface PaperTypeOption { id: string; name: string }
 
-type Quality = { gsm: string; price: string }
-type PaperTypeEntry = { type: string; price: string }
-type QtyTier = { min_qty: string; max_qty: string; unit_price: string }
+// Display row carries the master-option id, its name (for label), and the modifier amount as a string for editing
+type OptionEntry = { id: string; name: string; price_modifier: string }
+type QtySlab = { min_qty: string; max_qty: string; unit_price: string; max_completion_minutes: string }
 
 function ToolbarButton({
   onClick, active, disabled, children,
@@ -91,10 +96,9 @@ export function buildProductRequestPayload(
   name: string,
   basePrice: string,
   descHtml: string,
-  paperSizesSel: string[],
-  qualities: Quality[],
-  paperTypes: PaperTypeEntry[],
-  qtyTiers: QtyTier[],
+  paperSizesSel: OptionEntry[],
+  paperTypesSel: OptionEntry[],
+  qtySlabs: QtySlab[],
   images: string[],
   videoUrl: string,
 ): ProductRequestPayload {
@@ -102,17 +106,73 @@ export function buildProductRequestPayload(
     name: name.trim(),
     base_price: Number(basePrice),
     description: descHtml || null,
-    paper_sizes: paperSizesSel,
-    paper_qualities: qualities.map(q => ({ gsm: Number(q.gsm), price: Number(q.price) })),
-    paper_types: paperTypes.map(t => ({ type: t.type, price: Number(t.price) })),
-    quantity_tiers: qtyTiers.map(t => ({
-      min_qty: Number(t.min_qty),
-      max_qty: t.max_qty ? Number(t.max_qty) : null,
-      unit_price: Number(t.unit_price),
+    paper_sizes: paperSizesSel.map(s => ({ paper_size_id: s.id, price_modifier: Number(s.price_modifier) || 0 })),
+    paper_types: paperTypesSel.map(t => ({ paper_type_id: t.id, price_modifier: Number(t.price_modifier) || 0 })),
+    quantity_slabs: qtySlabs.map(s => ({
+      min_qty: Number(s.min_qty),
+      max_qty: s.max_qty ? Number(s.max_qty) : null,
+      unit_price: Number(s.unit_price),
+      max_completion_minutes: s.max_completion_minutes ? Number(s.max_completion_minutes) : null,
     })),
     images,
     video_url: videoUrl || null,
   }
+}
+
+function VariantOptionSection({
+  title, readOnly, entries, setEntries, available, pending, setPending, placeholder,
+}: {
+  title: string
+  readOnly: boolean
+  entries: OptionEntry[]
+  setEntries: React.Dispatch<React.SetStateAction<OptionEntry[]>>
+  available: { id: string; name: string }[]
+  pending: string
+  setPending: (v: string) => void
+  placeholder: string
+}) {
+  return (
+    <section className="space-y-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
+      {!readOnly && available.length > 0 && (
+        <div className="flex gap-2">
+          <Select value={pending || null} onValueChange={v => setPending(v ?? '')}>
+            <SelectTrigger className="flex-1 w-full min-w-0"><SelectValue placeholder={placeholder} /></SelectTrigger>
+            <SelectContent>
+              {available.map(o => (
+                <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button type="button" variant="outline" size="icon" disabled={!pending} onClick={() => {
+            const opt = available.find(o => o.id === pending)
+            if (!opt || entries.some(e => e.id === opt.id)) return
+            setEntries(p => [...p, { id: opt.id, name: opt.name, price_modifier: '' }])
+            setPending('')
+          }}><PlusIcon className="h-4 w-4" /></Button>
+        </div>
+      )}
+      {entries.length > 0 && (
+        <div className="rounded-md border divide-y">
+          {entries.map((e, i) => (
+            <div key={e.id} className="flex items-center gap-3 px-3 py-2">
+              <span className="text-sm font-medium w-28 shrink-0 truncate">{e.name}</span>
+              <div className="relative flex-1">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">+/- ₹</span>
+                <Input type="number" className="pl-12" value={e.price_modifier} disabled={readOnly}
+                  onChange={ev => setEntries(p => p.map((x, j) => j === i ? { ...x, price_modifier: ev.target.value } : x))} />
+              </div>
+              {!readOnly && (
+                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setEntries(p => p.filter((_, j) => j !== i))}>
+                  <XIcon className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
 }
 
 export function ProductRequestForm({
@@ -133,28 +193,26 @@ export function ProductRequestForm({
   hideSubmit?: boolean
 }) {
   const [paperSizes, setPaperSizes] = useState<PaperSize[]>([])
-  const [paperQualityOptions, setPaperQualityOptions] = useState<PaperQualityOption[]>([])
   const [paperTypeOptions, setPaperTypeOptions] = useState<PaperTypeOption[]>([])
 
   const [name, setName] = useState(initial?.name ?? '')
   const [basePrice, setBasePrice] = useState(initial?.base_price != null ? String(initial.base_price) : '')
-  const [paperSizesSel, setPaperSizesSel] = useState<string[]>(initial?.paper_sizes ?? [])
-  const [qualities, setQualities] = useState<Quality[]>(
-    (initial?.paper_qualities ?? []).map(q => ({ gsm: String(q.gsm), price: String(q.price) })),
+  const [paperSizesSel, setPaperSizesSel] = useState<OptionEntry[]>(
+    (initial?.paper_sizes ?? []).map(s => ({ id: s.paper_size_id, name: s.name ?? '', price_modifier: String(s.price_modifier) })),
   )
-  const [paperTypes, setPaperTypes] = useState<PaperTypeEntry[]>(
-    (initial?.paper_types ?? []).map(t => ({ type: t.type, price: String(t.price) })),
+  const [paperTypesSel, setPaperTypesSel] = useState<OptionEntry[]>(
+    (initial?.paper_types ?? []).map(t => ({ id: t.paper_type_id, name: t.name ?? '', price_modifier: String(t.price_modifier) })),
   )
-  const [qtyTiers, setQtyTiers] = useState<QtyTier[]>(
-    (initial?.quantity_tiers ?? []).map(t => ({
-      min_qty: String(t.min_qty),
-      max_qty: t.max_qty != null ? String(t.max_qty) : '',
-      unit_price: String(t.unit_price),
+  const [qtySlabs, setQtySlabs] = useState<QtySlab[]>(
+    (initial?.quantity_slabs ?? []).map(s => ({
+      min_qty: String(s.min_qty),
+      max_qty: s.max_qty != null ? String(s.max_qty) : '',
+      unit_price: String(s.unit_price),
+      max_completion_minutes: s.max_completion_minutes != null ? String(s.max_completion_minutes) : '',
     })),
   )
-  const [pendingGsm, setPendingGsm] = useState('')
-  const [pendingType, setPendingType] = useState('')
   const [pendingSize, setPendingSize] = useState('')
+  const [pendingType, setPendingType] = useState('')
   const [images, setImages] = useState<string[]>(initial?.images ?? [])
   const [videoUrl, setVideoUrl] = useState(initial?.video_url ?? '')
   const [uploadingImages, setUploadingImages] = useState(false)
@@ -188,11 +246,9 @@ export function ProductRequestForm({
   useEffect(() => {
     Promise.all([
       api.get<{ items: PaperSize[] }>('/printer/paper/sizes'),
-      api.get<{ items: PaperQualityOption[] }>('/printer/paper/qualities'),
       api.get<{ items: PaperTypeOption[] }>('/printer/paper/types'),
-    ]).then(([sizes, qualities, types]) => {
+    ]).then(([sizes, types]) => {
       setPaperSizes(sizes.items ?? [])
-      setPaperQualityOptions(qualities.items ?? [])
       setPaperTypeOptions(types.items ?? [])
     }).catch(() => {})
   }, [])
@@ -202,17 +258,8 @@ export function ProductRequestForm({
       descEditor.commands.setContent(initial.description)
   }, [initial?.description, descEditor])
 
-  function qualityDisplay(gsm: string) {
-    const opt = paperQualityOptions.find(q => String(q.gsm) === gsm)
-    return opt?.label ? `${gsm} gsm — ${opt.label}` : `${gsm} gsm`
-  }
-
-  const availableQualities = paperQualityOptions.filter(
-    q => !qualities.some(x => x.gsm === String(q.gsm)),
-  )
-  const availableTypes = paperTypeOptions.filter(
-    t => !paperTypes.some(x => x.type === t.name),
-  )
+  const availableSizes = paperSizes.filter(s => !paperSizesSel.some(x => x.id === s.id))
+  const availableTypes = paperTypeOptions.filter(t => !paperTypesSel.some(x => x.id === t.id))
 
   async function uploadImageFiles(files: File[]) {
     if (!files.length || readOnly) return
@@ -271,7 +318,7 @@ export function ProductRequestForm({
     if (!onSubmit || readOnly) return
     const payload = buildProductRequestPayload(
       name, basePrice, getDescriptionHtml(), paperSizesSel,
-      qualities, paperTypes, qtyTiers, images, videoUrl,
+      paperTypesSel, qtySlabs, images, videoUrl,
     )
     onSubmit(payload)
   }
@@ -416,139 +463,50 @@ export function ProductRequestForm({
         )}
       </section>
 
-      <section className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Paper sizes</p>
-        {paperSizesSel.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {paperSizesSel.map(s => (
-              <span key={s} className="inline-flex items-center gap-1 rounded-full border border-primary bg-primary/10 text-primary px-2.5 py-0.5 text-sm">
-                {s}
-                {!readOnly && (
-                  <button type="button" onClick={() => setPaperSizesSel(prev => prev.filter(x => x !== s))}>
-                    <XIcon className="h-3 w-3" />
-                  </button>
-                )}
-              </span>
-            ))}
-          </div>
-        )}
-        {!readOnly && paperSizes.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {paperSizes.filter(s => !paperSizesSel.includes(s.name)).map(s => (
-              <button key={s.id} type="button" onClick={() => setPaperSizesSel(prev => [...prev, s.name])}
-                className="rounded-full border px-2.5 py-0.5 text-sm hover:border-primary">+ {s.name}</button>
-            ))}
-          </div>
-        )}
-        {!readOnly && (
-          <div className="flex gap-2">
-            <Input placeholder="Custom size" value={pendingSize} onChange={e => setPendingSize(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); const v = pendingSize.trim(); if (v && !paperSizesSel.includes(v)) { setPaperSizesSel(p => [...p, v]); setPendingSize('') } } }} />
-            <Button type="button" variant="outline" size="icon" onClick={() => { const v = pendingSize.trim(); if (v && !paperSizesSel.includes(v)) { setPaperSizesSel(p => [...p, v]); setPendingSize('') } }} disabled={!pendingSize.trim()}>
-              <PlusIcon className="h-4 w-4" />
-            </Button>
-          </div>
-        )}
-      </section>
+      <VariantOptionSection
+        title="Paper sizes"
+        readOnly={readOnly}
+        entries={paperSizesSel}
+        setEntries={setPaperSizesSel}
+        available={availableSizes}
+        pending={pendingSize}
+        setPending={setPendingSize}
+        placeholder="Select size…"
+      />
 
-      <section className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Paper quality (GSM)</p>
-        {!readOnly && paperQualityOptions.length > 0 && (
-          <div className="flex gap-2">
-            <Select value={pendingGsm || null} onValueChange={v => setPendingGsm(v ?? '')}>
-              <SelectTrigger className="flex-1 w-full min-w-0"><SelectValue placeholder="Select GSM…" /></SelectTrigger>
-              <SelectContent>
-                {availableQualities.map(q => (
-                  <SelectItem key={q.id} value={String(q.gsm)}>{q.gsm} gsm{q.label ? ` — ${q.label}` : ''}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button type="button" variant="outline" size="icon" disabled={!pendingGsm} onClick={() => {
-              if (!pendingGsm || qualities.some(q => q.gsm === pendingGsm)) return
-              setQualities(p => [...p, { gsm: pendingGsm, price: '' }]); setPendingGsm('')
-            }}><PlusIcon className="h-4 w-4" /></Button>
-          </div>
-        )}
-        {qualities.length > 0 && (
-          <div className="rounded-md border divide-y">
-            {qualities.map((q, i) => (
-              <div key={q.gsm} className="flex items-center gap-3 px-3 py-2">
-                <span className="text-sm font-medium w-36 shrink-0">{qualityDisplay(q.gsm)}</span>
-                <div className="relative flex-1">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
-                  <Input type="number" className="pl-7" value={q.price} disabled={readOnly}
-                    onChange={e => setQualities(p => p.map((x, j) => j === i ? { ...x, price: e.target.value } : x))} />
-                </div>
-                {!readOnly && (
-                  <Button type="button" variant="ghost" size="icon-sm" onClick={() => setQualities(p => p.filter((_, j) => j !== i))}>
-                    <XIcon className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
-
-      <section className="space-y-3">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Paper type</p>
-        {!readOnly && paperTypeOptions.length > 0 && (
-          <div className="flex gap-2">
-            <Select value={pendingType || null} onValueChange={v => setPendingType(v ?? '')}>
-              <SelectTrigger className="flex-1 w-full min-w-0"><SelectValue placeholder="Select type…" /></SelectTrigger>
-              <SelectContent>
-                {availableTypes.map(t => (
-                  <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button type="button" variant="outline" size="icon" disabled={!pendingType} onClick={() => {
-              if (!pendingType || paperTypes.some(t => t.type === pendingType)) return
-              setPaperTypes(p => [...p, { type: pendingType, price: '' }]); setPendingType('')
-            }}><PlusIcon className="h-4 w-4" /></Button>
-          </div>
-        )}
-        {paperTypes.length > 0 && (
-          <div className="rounded-md border divide-y">
-            {paperTypes.map((t, i) => (
-              <div key={t.type} className="flex items-center gap-3 px-3 py-2">
-                <span className="text-sm font-medium w-24 shrink-0">{t.type}</span>
-                <div className="relative flex-1">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
-                  <Input type="number" className="pl-7" value={t.price} disabled={readOnly}
-                    onChange={e => setPaperTypes(p => p.map((x, j) => j === i ? { ...x, price: e.target.value } : x))} />
-                </div>
-                {!readOnly && (
-                  <Button type="button" variant="ghost" size="icon-sm" onClick={() => setPaperTypes(p => p.filter((_, j) => j !== i))}>
-                    <XIcon className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </section>
+      <VariantOptionSection
+        title="Paper type"
+        readOnly={readOnly}
+        entries={paperTypesSel}
+        setEntries={setPaperTypesSel}
+        available={availableTypes}
+        pending={pendingType}
+        setPending={setPendingType}
+        placeholder="Select type…"
+      />
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quantity tiers</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quantity slabs</p>
           {!readOnly && (
-            <Button type="button" variant="outline" size="sm" onClick={() => setQtyTiers(p => [...p, { min_qty: '', max_qty: '', unit_price: '' }])}>
-              <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add tier
+            <Button type="button" variant="outline" size="sm" onClick={() => setQtySlabs(p => [...p, { min_qty: '', max_qty: '', unit_price: '', max_completion_minutes: '' }])}>
+              <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add slab
             </Button>
           )}
         </div>
-        {qtyTiers.map((tier, i) => (
-          <div key={i} className="grid grid-cols-3 gap-2 items-center">
-            <Input type="number" placeholder="Min" value={tier.min_qty} disabled={readOnly}
-              onChange={e => setQtyTiers(p => p.map((x, j) => j === i ? { ...x, min_qty: e.target.value } : x))} />
-            <Input type="number" placeholder="Max (∞ blank)" value={tier.max_qty} disabled={readOnly}
-              onChange={e => setQtyTiers(p => p.map((x, j) => j === i ? { ...x, max_qty: e.target.value } : x))} />
+        {qtySlabs.map((slab, i) => (
+          <div key={i} className="grid grid-cols-4 gap-2 items-center">
+            <Input type="number" placeholder="Min qty" value={slab.min_qty} disabled={readOnly}
+              onChange={e => setQtySlabs(p => p.map((x, j) => j === i ? { ...x, min_qty: e.target.value } : x))} />
+            <Input type="number" placeholder="Max (∞ blank)" value={slab.max_qty} disabled={readOnly}
+              onChange={e => setQtySlabs(p => p.map((x, j) => j === i ? { ...x, max_qty: e.target.value } : x))} />
+            <Input type="number" placeholder="Base unit ₹" value={slab.unit_price} disabled={readOnly}
+              onChange={e => setQtySlabs(p => p.map((x, j) => j === i ? { ...x, unit_price: e.target.value } : x))} />
             <div className="flex gap-1">
-              <Input type="number" placeholder="Unit ₹" value={tier.unit_price} disabled={readOnly}
-                onChange={e => setQtyTiers(p => p.map((x, j) => j === i ? { ...x, unit_price: e.target.value } : x))} />
+              <Input type="number" placeholder="Completion (min)" value={slab.max_completion_minutes} disabled={readOnly}
+                onChange={e => setQtySlabs(p => p.map((x, j) => j === i ? { ...x, max_completion_minutes: e.target.value } : x))} />
               {!readOnly && (
-                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setQtyTiers(p => p.filter((_, j) => j !== i))}>
+                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setQtySlabs(p => p.filter((_, j) => j !== i))}>
                   <XIcon className="h-3.5 w-3.5" />
                 </Button>
               )}

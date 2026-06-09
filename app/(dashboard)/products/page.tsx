@@ -34,19 +34,22 @@ interface CityPricingItem {
   city_id: string | null
   city_name: string | null
   city_state: string | null
-  base_price: number | null
-  paper_qualities: { gsm: number; price: number }[]
-  paper_types: { type: string; price: number }[]
-  quantity_tiers: { min_qty: number; max_qty: number | null; unit_price: number }[]
+  price_modifier: number | null
 }
 
 interface ProductDetail {
   id: string
   name: string
   base_price: number
-  paper_qualities: { gsm: number; price: number }[]
-  paper_types: { type: string; price: number }[]
-  quantity_tiers: { min_qty: number; max_qty: number | null; unit_price: number }[]
+  paper_sizes: { paper_size_id: string; price_modifier: number; name?: string }[]
+  paper_qualities: { paper_quality_id: string; price_modifier: number; name?: string }[]
+  paper_types: { paper_type_id: string; price_modifier: number; name?: string }[]
+  quantity_slabs: {
+    min_qty: number
+    max_qty: number | null
+    price_modifier: number
+    max_completion_minutes: number | null
+  }[]
 }
 
 interface ProductRequestListItem {
@@ -240,9 +243,10 @@ export default function ProductsPage() {
       const res = await api.get<{ data: ProductDetail }>(`/printer/products/${product.id}`)
       setPriceInitial({
         base_price: res.data.base_price,
+        paper_sizes: res.data.paper_sizes,
         paper_qualities: res.data.paper_qualities,
         paper_types: res.data.paper_types,
-        quantity_tiers: res.data.quantity_tiers,
+        quantity_slabs: res.data.quantity_slabs,
       })
     } catch {
       // still usable without pre-fill
@@ -263,9 +267,10 @@ export default function ProductsPage() {
       setPriceRequestDetail(cached)
       setPriceInitial({
         base_price: cached.base_price,
+        paper_sizes: cached.paper_sizes,
         paper_qualities: cached.paper_qualities,
         paper_types: cached.paper_types,
-        quantity_tiers: cached.quantity_tiers,
+        quantity_slabs: cached.quantity_slabs,
         notes: cached.notes,
       })
       if (cached.product_id) setPriceProductId(cached.product_id)
@@ -278,9 +283,10 @@ export default function ProductsPage() {
       setPriceRequestDetail(res.data)
       setPriceInitial({
         base_price: res.data.base_price,
+        paper_sizes: res.data.paper_sizes,
         paper_qualities: res.data.paper_qualities,
         paper_types: res.data.paper_types,
-        quantity_tiers: res.data.quantity_tiers,
+        quantity_slabs: res.data.quantity_slabs,
         notes: res.data.notes,
       })
       if (res.data.product_id) setPriceProductId(res.data.product_id)
@@ -598,22 +604,12 @@ export default function ProductsPage() {
                       <Badge variant="outline" className="text-xs">{item.city_state}</Badge>
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      Base price:{' '}
-                      {item.base_price != null
-                        ? <span className="font-medium text-foreground">₹{Number(item.base_price).toLocaleString('en-IN')}</span>
-                        : <span className="italic">Same as default</span>
+                      City price modifier:{' '}
+                      {item.price_modifier != null
+                        ? <span className="font-medium text-foreground">{Number(item.price_modifier) >= 0 ? '+' : ''}₹{Number(item.price_modifier).toLocaleString('en-IN')}</span>
+                        : <span className="italic">₹0 (No modifier)</span>
                       }
                     </p>
-                    {item.paper_qualities.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        Paper qualities: {item.paper_qualities.map(q => `${q.gsm}gsm`).join(', ')}
-                      </p>
-                    )}
-                    {item.quantity_tiers.length > 0 && (
-                      <p className="text-xs text-muted-foreground">
-                        Quantity tiers: {item.quantity_tiers.length} tier{item.quantity_tiers.length !== 1 ? 's' : ''}
-                      </p>
-                    )}
                   </div>
                 ))}
               </div>
