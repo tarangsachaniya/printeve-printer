@@ -83,6 +83,7 @@ async function uploadToCloudinary(file: File, type: 'image' | 'video'): Promise<
   fd.append('file', file)
   fd.append('upload_preset', UPLOAD_PRESET)
   fd.append('folder', 'printEve/products')
+  if (type === 'image') fd.append('format', 'webp')
   const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/${type}/upload`, {
     method: 'POST',
     body: fd,
