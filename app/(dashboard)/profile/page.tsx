@@ -63,6 +63,8 @@ interface PrinterProfile {
   created_at: string
   description?: string | null
   area?: string | null
+  agreed_at?: string | null
+  signature_data?: string | null
   printer_locations: PrinterLocation[]
   printer_bank_details: BankDetails | null
   user: { email: string; phone: string; full_name: string } | null
@@ -469,6 +471,33 @@ export default function ProfilePage() {
                   </div>
                 ) : (
                   <p className="text-muted-foreground">No bank details added yet. Click Edit to add.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Signature */}
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">Agreement Signature</CardTitle>
+              </CardHeader>
+              <CardContent className="text-sm">
+                {profile.signature_data ? (
+                  <div className="space-y-2">
+                    <div className="rounded-lg border bg-muted/30 p-3 flex items-center justify-center">
+                      <img
+                        src={profile.signature_data}
+                        alt="Signature"
+                        className="max-h-32 object-contain"
+                      />
+                    </div>
+                    {profile.agreed_at && (
+                      <p className="text-muted-foreground text-xs">
+                        Signed on {new Date(profile.agreed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">Agreement not signed yet.</p>
                 )}
               </CardContent>
             </Card>
