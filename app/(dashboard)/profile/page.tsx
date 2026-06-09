@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { toast } from 'sonner'
@@ -12,6 +12,29 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SignatureCanvas } from '@/components/signature-canvas'
+
+const CLOUD_NAME    = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME    ?? ''
+const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? ''
+
+async function uploadSignatureToCloudinary(canvas: HTMLCanvasElement, name: string): Promise<string> {
+  const safeName = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'signature'
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error('Canvas export failed')), 'image/png')
+  )
+  const fd = new FormData()
+  fd.append('file', blob, `${safeName}.png`)
+  fd.append('upload_preset', UPLOAD_PRESET)
+  fd.append('folder', 'signatures')
+  fd.append('public_id', safeName)
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+    method: 'POST',
+    body: fd,
+  })
+  const data = await res.json() as { secure_url?: string; error?: { message: string } }
+  if (!res.ok) throw new Error(data.error?.message ?? 'Signature upload failed')
+  return data.secure_url!
+}
 
 // ─── TipTap toolbar ───────────────────────────────────────────────────────────
 
@@ -138,6 +161,13 @@ export default function ProfilePage() {
   const [pwError, setPwError] = useState('')
   const [pwSaving, setPwSaving] = useState(false)
 
+  // Agreement / Signature
+  const [sigEdit, setSigEdit] = useState(false)
+  const [sigAgreed, setSigAgreed] = useState(false)
+  const [sigSigned, setSigSigned] = useState(false)
+  const [sigSaving, setSigSaving] = useState(false)
+  const sigCanvasRef = useRef<HTMLCanvasElement>(null)
+
   const descEditor = useEditor({
     extensions: [StarterKit],
     content: '',
@@ -234,6 +264,22 @@ export default function ProfilePage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update about')
     } finally { setAboutSaving(false) }
+  }
+
+  async function saveAgreement() {
+    if (!sigCanvasRef.current) return
+    setSigSaving(true)
+    try {
+      const signature_url = await uploadSignatureToCloudinary(sigCanvasRef.current, profile?.business_name ?? '')
+      await api.patch('/printer/profile/agreement', { signature_url })
+      setProfile(p => p ? { ...p, signature_data: signature_url, agreed_at: new Date().toISOString() } : p)
+      setSigEdit(false)
+      setSigAgreed(false)
+      setSigSigned(false)
+      toast.success('Agreement signed')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to sign agreement')
+    } finally { setSigSaving(false) }
   }
 
   async function changePassword() {
@@ -477,18 +523,42 @@ export default function ProfilePage() {
 
             {/* Signature */}
             <Card>
-              <CardHeader className="pb-3">
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
                 <CardTitle className="text-base">Agreement Signature</CardTitle>
+                {!sigEdit && (
+                  <Button size="sm" variant="outline" onClick={() => { setSigEdit(true); setSigAgreed(false); setSigSigned(false) }}>
+                    {profile.signature_data ? 'Re-sign' : 'Sign Agreement'}
+                  </Button>
+                )}
               </CardHeader>
-              <CardContent className="text-sm">
-                {profile.signature_data ? (
+              <CardContent className="text-sm space-y-4">
+                {sigEdit ? (
+                  <div className="space-y-4">
+                    <label className="flex items-start gap-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={sigAgreed}
+                        onChange={e => setSigAgreed(e.target.checked)}
+                        className="mt-0.5 h-4 w-4 rounded border-input accent-primary cursor-pointer shrink-0"
+                      />
+                      <span className="text-sm font-medium leading-snug">
+                        I have read and agree to the terms and conditions
+                      </span>
+                    </label>
+                    {sigAgreed && (
+                      <SignatureCanvas canvasRef={sigCanvasRef} onSigned={setSigSigned} />
+                    )}
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={() => setSigEdit(false)} disabled={sigSaving}>Cancel</Button>
+                      <Button size="sm" onClick={saveAgreement} disabled={sigSaving || !sigAgreed || !sigSigned}>
+                        {sigSaving ? 'Saving…' : 'Submit Signature'}
+                      </Button>
+                    </div>
+                  </div>
+                ) : profile.signature_data ? (
                   <div className="space-y-2">
                     <div className="rounded-lg border bg-muted/30 p-3 flex items-center justify-center">
-                      <img
-                        src={profile.signature_data}
-                        alt="Signature"
-                        className="max-h-32 object-contain"
-                      />
+                      <img src={profile.signature_data} alt="Signature" className="max-h-32 object-contain" />
                     </div>
                     {profile.agreed_at && (
                       <p className="text-muted-foreground text-xs">
@@ -497,7 +567,7 @@ export default function ProfilePage() {
                     )}
                   </div>
                 ) : (
-                  <p className="text-muted-foreground">Agreement not signed yet.</p>
+                  <p className="text-muted-foreground">Agreement not signed yet. Click Sign Agreement to proceed.</p>
                 )}
               </CardContent>
             </Card>
