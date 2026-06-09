@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PrintVana Printer",
-  description: "PrintVana printer dashboard",
+  title: "PrintEve Printer",
+  description: "PrintEve printer dashboard",
 };
 
 export default function RootLayout({
