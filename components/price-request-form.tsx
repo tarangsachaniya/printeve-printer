@@ -1,14 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { PlusIcon, XIcon } from 'lucide-react'
-import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from '@/components/ui/select'
+import { Combobox } from '@/components/ui/combobox'
+import { InfoTooltip } from '@/components/ui/info-tooltip'
 
 export interface VariantOptionEntry { id: string; price_modifier: number }
 export interface QuantitySlabEntry {
@@ -54,9 +52,10 @@ function toQtySlabs(slabs?: QuantitySlabEntry[]): QtySlab[] {
 }
 
 function VariantOptionSection({
-  title, readOnly, entries, setEntries, available, pending, setPending, placeholder,
+  title, description, readOnly, entries, setEntries, available, pending, setPending, placeholder,
 }: {
   title: string
+  description?: string
   readOnly: boolean
   entries: OptionEntry[]
   setEntries: React.Dispatch<React.SetStateAction<OptionEntry[]>>
@@ -67,24 +66,23 @@ function VariantOptionSection({
 }) {
   return (
     <section className="space-y-3">
-      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
+      <div className="flex items-center gap-1.5">
+        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
+        {description && <InfoTooltip text={description} />}
+      </div>
       {!readOnly && available.length > 0 && (
-        <div className="flex gap-2">
-          <Select value={pending || null} onValueChange={v => setPending(v ?? '')}>
-            <SelectTrigger className="flex-1 w-full min-w-0"><SelectValue placeholder={placeholder} /></SelectTrigger>
-            <SelectContent>
-              {available.map(o => (
-                <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button type="button" variant="outline" size="icon" disabled={!pending} onClick={() => {
-            const opt = available.find(o => o.id === pending)
+        <Combobox
+          options={available.map(o => ({ value: o.id, label: o.name }))}
+          value={pending}
+          onValueChange={v => {
+            const opt = available.find(o => o.id === v)
             if (!opt || entries.some(e => e.id === opt.id)) return
             setEntries(p => [...p, { id: opt.id, name: opt.name, price_modifier: '' }])
             setPending('')
-          }}><PlusIcon className="h-4 w-4" /></Button>
-        </div>
+          }}
+          placeholder={placeholder}
+          searchPlaceholder="Search…"
+        />
       )}
       {entries.length > 0 ? (
         <div className="rounded-md border divide-y">
@@ -119,6 +117,9 @@ export function PriceRequestForm({
   saving = false,
   formId = 'price-request-form',
   hideSubmit = false,
+  paperSizes = [],
+  paperQualities: paperQualitiesRaw = [],
+  paperTypes: paperTypeOptions = [],
 }: {
   productId: string
   initial?: PriceRequestInitial
@@ -127,10 +128,14 @@ export function PriceRequestForm({
   saving?: boolean
   formId?: string
   hideSubmit?: boolean
+  paperSizes?: PaperSize[]
+  paperQualities?: { id: string; gsm: number; label: string | null }[]
+  paperTypes?: PaperTypeOption[]
 }) {
-  const [paperSizes, setPaperSizes] = useState<PaperSize[]>([])
-  const [paperQualities, setPaperQualities] = useState<PaperQuality[]>([])
-  const [paperTypeOptions, setPaperTypeOptions] = useState<PaperTypeOption[]>([])
+  const paperQualities = useMemo<PaperQuality[]>(() => paperQualitiesRaw.map(q => ({
+    id: q.id,
+    name: q.label ? `${q.gsm} GSM (${q.label})` : `${q.gsm} GSM`,
+  })), [paperQualitiesRaw])
 
   const [basePrice, setBasePrice] = useState(initial?.base_price != null ? String(initial.base_price) : '')
   const [paperSizesSel, setPaperSizesSel] = useState<OptionEntry[]>(
@@ -147,23 +152,6 @@ export function PriceRequestForm({
   const [pendingSize, setPendingSize] = useState('')
   const [pendingQuality, setPendingQuality] = useState('')
   const [pendingType, setPendingType] = useState('')
-
-  useEffect(() => {
-    Promise.all([
-      api.get<{ items: PaperSize[] }>('/printer/paper/sizes'),
-      api.get<{ items: { id: string; gsm: number; label: string | null }[] }>('/printer/paper/qualities'),
-      api.get<{ items: PaperTypeOption[] }>('/printer/paper/types'),
-    ]).then(([sizes, qualities, types]) => {
-      setPaperSizes(sizes.items ?? [])
-      setPaperQualities(
-        (qualities.items ?? []).map(q => ({
-          id: q.id,
-          name: q.label ? `${q.gsm} GSM (${q.label})` : `${q.gsm} GSM`,
-        }))
-      )
-      setPaperTypeOptions(types.items ?? [])
-    }).catch(() => {})
-  }, [])
 
   // re-sync when initial changes (e.g. loaded after mount)
   useEffect(() => {
@@ -204,7 +192,10 @@ export function PriceRequestForm({
   return (
     <form id={formId} onSubmit={handleSubmit} className="space-y-7">
       <section className="space-y-2">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Base price</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Base price</p>
+          <InfoTooltip text="The base price per unit before any size, quality, or quantity adjustments are applied." />
+        </div>
         <div className="space-y-1.5">
           <Label>Proposed base price (₹) *</Label>
           <Input
@@ -220,6 +211,7 @@ export function PriceRequestForm({
 
       <VariantOptionSection
         title="Paper sizes"
+        description="Select the paper sizes this product can be printed in. For each size, enter how much to add (+) or subtract (-) from the base price per unit. Leave blank or enter 0 if the size has no extra charge."
         readOnly={readOnly}
         entries={paperSizesSel}
         setEntries={setPaperSizesSel}
@@ -231,6 +223,7 @@ export function PriceRequestForm({
 
       <VariantOptionSection
         title="Paper Quality"
+        description="Select the paper quality (GSM / finish) options for this product. Enter how much to add (+) or subtract (-) from the base price per unit for each quality. Leave blank or enter 0 for no extra charge."
         readOnly={readOnly}
         entries={paperQualitiesSel}
         setEntries={setPaperQualitiesSel}
@@ -242,6 +235,7 @@ export function PriceRequestForm({
 
       <VariantOptionSection
         title="Paper type"
+        description="Select the paper types (e.g. Glossy, Matte, Kraft) available for this product. Enter how much to add (+) or subtract (-) from the base price per unit for each type. Leave blank or enter 0 for no extra charge."
         readOnly={readOnly}
         entries={paperTypesSel}
         setEntries={setPaperTypesSel}
@@ -253,7 +247,10 @@ export function PriceRequestForm({
 
       <section className="space-y-3">
         <div className="flex items-center justify-between">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quantity slabs</p>
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quantity slabs</p>
+            <InfoTooltip text="Set price adjustments based on order quantity. For each range, enter how much to add (+) or subtract (-) per unit from the base price. Also set the maximum time (in minutes) to fulfill orders in that range. Leave Max Qty blank for open-ended slabs (e.g. 100+)." />
+          </div>
           {!readOnly && (
             <Button
               type="button" variant="outline" size="sm"
@@ -335,7 +332,10 @@ export function PriceRequestForm({
       </section>
 
       <section className="space-y-1.5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Reason / notes</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Reason / notes</p>
+          <InfoTooltip text="Explain why you're requesting this price change. This note is shared with the admin reviewing your request." />
+        </div>
         <textarea
           className="w-full min-h-[80px] rounded-lg border px-3 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
           value={notes}

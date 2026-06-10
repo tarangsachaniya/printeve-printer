@@ -29,6 +29,16 @@ interface Product {
   selected: boolean
 }
 
+interface PaperSizeMeta { id: string; name: string }
+interface PaperQualityMeta { id: string; gsm: number; label: string | null }
+interface PaperTypeMeta { id: string; name: string }
+
+interface ProductsListMeta {
+  sizes: PaperSizeMeta[]
+  qualities: PaperQualityMeta[]
+  types: PaperTypeMeta[]
+}
+
 interface CityPricingItem {
   id: string
   city_id: string | null
@@ -90,6 +100,9 @@ export default function ProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [requests, setRequests] = useState<ProductRequestListItem[]>([])
   const [priceRequests, setPriceRequests] = useState<PriceRequestListItem[]>([])
+  const [paperSizes, setPaperSizes] = useState<PaperSizeMeta[]>([])
+  const [paperQualities, setPaperQualities] = useState<PaperQualityMeta[]>([])
+  const [paperTypes, setPaperTypes] = useState<PaperTypeMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
 
@@ -121,12 +134,15 @@ export default function ProductsPage() {
   function load() {
     setLoading(true)
     Promise.all([
-      api.get<{ items: Product[] }>('/printer/products'),
+      api.get<{ items: Product[]; meta: ProductsListMeta }>('/printer/products'),
       api.get<{ items: ProductRequestListItem[] }>('/printer/product-requests'),
       api.get<{ items: PriceRequestListItem[] }>('/printer/product-price-requests'),
     ])
       .then(([prods, reqs, priceReqs]) => {
         setProducts(prods.items ?? [])
+        setPaperSizes(prods.meta?.sizes ?? [])
+        setPaperQualities(prods.meta?.qualities ?? [])
+        setPaperTypes(prods.meta?.types ?? [])
         setRequests(reqs.items ?? [])
         setPriceRequests(priceReqs.items ?? [])
       })
@@ -507,6 +523,8 @@ export default function ProductsPage() {
                 saving={saving}
                 hideSubmit
                 submitLabel={isNew ? 'Submit for review' : 'Save changes'}
+                paperSizes={paperSizes}
+                paperTypes={paperTypes}
               />
             )}
           </div>
@@ -554,6 +572,9 @@ export default function ProductsPage() {
                 onSubmit={priceReadOnly ? undefined : handlePriceSubmit}
                 saving={savingPrice}
                 hideSubmit
+                paperSizes={paperSizes}
+                paperQualities={paperQualities}
+                paperTypes={paperTypes}
               />
             )}
           </div>
