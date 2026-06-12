@@ -16,6 +16,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
 import { SignatureCanvas } from '@/components/signature-canvas'
+import { useBootstrap } from '@/context/bootstrap-context'
 
 const CLOUD_NAME    = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME    ?? ''
 const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? ''
@@ -65,40 +66,6 @@ function ToolbarButton({
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface PrinterLocation {
-  address: string
-  city: string
-  pincode: string
-  latitude?: number
-  longitude?: number
-}
-
-interface BankDetails {
-  account_holder: string
-  bank_name: string
-  account_number: string
-  ifsc_code: string
-  upi_id?: string
-}
-
-interface PrinterProfile {
-  id: string
-  business_name: string
-  status: string
-  rating: number
-  created_at: string
-  description?: string | null
-  area?: string | null
-  agreed_at?: string | null
-  signature_data?: string | null
-  printer_locations: PrinterLocation[]
-  printer_bank_details: BankDetails | null
-  user: { email: string; phone: string; full_name: string } | null
-  legal_terms?: string | null
-}
-
-interface ProfileResponse { data: PrinterProfile }
-
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   active: 'default', pending: 'outline', suspended: 'destructive',
 }
@@ -135,8 +102,7 @@ function SectionActions({
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
-  const [profile, setProfile] = useState<PrinterProfile | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { profile, agreement, loading, setProfile } = useBootstrap()
 
   // Basic info
   const [basicEdit, setBasicEdit] = useState(false)
@@ -170,8 +136,8 @@ export default function ProfilePage() {
   const [sigAgreed, setSigAgreed] = useState(false)
   const [sigSigned, setSigSigned] = useState(false)
   const [sigSaving, setSigSaving] = useState(false)
-  const [legalHtml, setLegalHtml] = useState('')
-  const [legalLoading, setLegalLoading] = useState(true)
+  const legalHtml = agreement?.legal_terms ?? ''
+  const legalLoading = loading
   const sigCanvasRef = useRef<HTMLCanvasElement>(null)
 
   const descEditor = useEditor({
@@ -182,37 +148,28 @@ export default function ProfilePage() {
   })
 
   useEffect(() => {
-    api.get<ProfileResponse>('/printer/profile')
-      .then(res => {
-        const d = res.data
-        setProfile(d)
-        setBasicForm({ business_name: d.business_name ?? '', phone: d.user?.phone ?? '' })
-        setAreaInput(d.area ?? '')
-        const loc = d.printer_locations?.[0]
-        if (loc) setLocForm({
-          address: loc.address ?? '',
-          city: loc.city ?? '',
-          pincode: loc.pincode ?? '',
-          latitude: loc.latitude?.toString() ?? '',
-          longitude: loc.longitude?.toString() ?? '',
-        })
-        const bank = d.printer_bank_details
-        if (bank) setBankForm({
-          account_holder: bank.account_holder ?? '',
-          bank_name: bank.bank_name ?? '',
-          account_number: bank.account_number ?? '',
-          ifsc_code: bank.ifsc_code ?? '',
-          upi_id: bank.upi_id ?? '',
-        })
-        descEditor?.commands.setContent(d.description ?? '')
-        setLegalHtml(d.legal_terms ?? '')
-      })
-      .catch(err => toast.error(err.message ?? 'Failed to load profile'))
-      .finally(() => {
-        setLoading(false)
-        setLegalLoading(false)
-      })
-  }, [descEditor])
+    if (!profile) return
+    const d = profile
+    setBasicForm({ business_name: d.business_name ?? '', phone: d.user?.phone ?? '' })
+    setAreaInput(d.area ?? '')
+    const loc = d.printer_locations?.[0]
+    if (loc) setLocForm({
+      address: loc.address ?? '',
+      city: loc.city ?? '',
+      pincode: loc.pincode ?? '',
+      latitude: loc.latitude?.toString() ?? '',
+      longitude: loc.longitude?.toString() ?? '',
+    })
+    const bank = d.printer_bank_details
+    if (bank) setBankForm({
+      account_holder: bank.account_holder ?? '',
+      bank_name: bank.bank_name ?? '',
+      account_number: bank.account_number ?? '',
+      ifsc_code: bank.ifsc_code ?? '',
+      upi_id: bank.upi_id ?? '',
+    })
+    descEditor?.commands.setContent(d.description ?? '')
+  }, [profile, descEditor])
 
   async function saveBasicInfo() {
     setBasicSaving(true)

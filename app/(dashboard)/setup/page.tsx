@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { SignatureCanvas } from '@/components/signature-canvas'
+import { useBootstrap } from '@/context/bootstrap-context'
 
 const CLOUD_NAME   = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME   ?? ''
 const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? ''
@@ -29,12 +30,6 @@ async function uploadSignatureToCloudinary(canvas: HTMLCanvasElement, name: stri
   const data = await res.json() as { secure_url?: string; error?: { message: string } }
   if (!res.ok) throw new Error(data.error?.message ?? 'Signature upload failed')
   return data.secure_url!
-}
-
-interface Product {
-  id: string
-  name: string
-  base_price: number
 }
 
 const TOTAL_STEPS = 5
@@ -64,8 +59,8 @@ export default function SetupPage() {
   const [error, setError] = useState('')
 
   // Step 0 — Password
-  const [legalHtml, setLegalHtml] = useState('')
-  const [legalLoading, setLegalLoading] = useState(true)
+  const { agreement, products, loading: legalLoading } = useBootstrap()
+  const legalHtml = agreement?.legal_terms ?? ''
   const [agreed, setAgreed] = useState(false)
   const [signed, setSigned] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -85,7 +80,6 @@ export default function SetupPage() {
   const [locating, setLocating] = useState(false)
 
   // Step 3 — Products
-  const [products, setProducts] = useState<Product[]>([])
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
 
   // Step 4 — Bank
@@ -96,15 +90,8 @@ export default function SetupPage() {
   const [upiId, setUpiId] = useState('')
 
   useEffect(() => {
-    api.get<{ value: string }>('/printer/legal')
-      .then(d => setLegalHtml(d.value ?? ''))
-      .catch(() => setLegalHtml(''))
-      .finally(() => setLegalLoading(false))
-
-    api.get<{ items: Product[] }>('/printer/products')
-      .then(res => setProducts(res.items ?? []))
-      .catch(() => {})
-  }, [])
+    setSelectedProducts(products.filter(p => p.selected).map(p => p.id))
+  }, [products])
 
   function toggleProduct(id: string) {
     setSelectedProducts(prev =>

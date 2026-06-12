@@ -37,6 +37,8 @@ interface ProductsListMeta {
   sizes: PaperSizeMeta[]
   qualities: PaperQualityMeta[]
   types: PaperTypeMeta[]
+  product_requests: ProductRequestListItem[]
+  price_requests: PriceRequestMetaItem[]
 }
 
 interface CityPricingItem {
@@ -88,6 +90,16 @@ interface PriceRequestListItem {
   created_at: string
 }
 
+interface PriceRequestMetaItem {
+  id: string
+  product_id: string | null
+  base_price: number
+  status: 'pending' | 'approved' | 'rejected'
+  admin_notes?: string | null
+  notes?: string | null
+  created_at: string
+}
+
 interface PriceRequestDetail extends PriceRequestInitial {
   id: string
   product_id: string | null
@@ -133,18 +145,23 @@ export default function ProductsPage() {
 
   function load() {
     setLoading(true)
-    Promise.all([
-      api.get<{ items: Product[]; meta: ProductsListMeta }>('/printer/products'),
-      api.get<{ items: ProductRequestListItem[] }>('/printer/product-requests'),
-      api.get<{ items: PriceRequestListItem[] }>('/printer/product-price-requests'),
-    ])
-      .then(([prods, reqs, priceReqs]) => {
-        setProducts(prods.items ?? [])
+    api.get<{ items: Product[]; meta: ProductsListMeta }>('/printer/products')
+      .then(prods => {
+        const items = prods.items ?? []
+        setProducts(items)
         setPaperSizes(prods.meta?.sizes ?? [])
         setPaperQualities(prods.meta?.qualities ?? [])
         setPaperTypes(prods.meta?.types ?? [])
-        setRequests(reqs.items ?? [])
-        setPriceRequests(priceReqs.items ?? [])
+        setRequests(prods.meta?.product_requests ?? [])
+
+        const productById = new Map(items.map(p => [p.id, p]))
+        setPriceRequests(
+          (prods.meta?.price_requests ?? []).map(r => ({
+            ...r,
+            product_name: productById.get(r.product_id ?? '')?.name ?? null,
+            current_price: productById.get(r.product_id ?? '')?.base_price ?? null,
+          })),
+        )
       })
       .catch(err => toast.error(err.message ?? 'Failed to load products'))
       .finally(() => setLoading(false))
