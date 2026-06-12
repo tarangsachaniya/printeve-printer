@@ -264,8 +264,8 @@ export default function ProductsPage() {
         paper_types: res.data.paper_types,
         quantity_slabs: res.data.quantity_slabs,
       })
-    } catch {
-      // still usable without pre-fill
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load product pricing')
     } finally {
       setLoadingPriceDetail(false)
     }
@@ -562,7 +562,26 @@ export default function ProductsPage() {
 
           <div className="flex-1 overflow-y-auto px-6 py-5">
             {loadingPriceDetail ? (
-              <p className="text-muted-foreground">Loading…</p>
+              <div className="space-y-7">
+                <div className="space-y-2">
+                  <Skeleton className="h-3 w-24" />
+                  <Skeleton className="h-9 w-full" />
+                </div>
+                <div className="space-y-3">
+                  <Skeleton className="h-3 w-20" />
+                  <Skeleton className="h-9 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                </div>
+                <div className="space-y-3">
+                  <Skeleton className="h-3 w-24" />
+                  <Skeleton className="h-9 w-full" />
+                  <Skeleton className="h-16 w-full" />
+                </div>
+                <div className="space-y-3">
+                  <Skeleton className="h-3 w-28" />
+                  <Skeleton className="h-32 w-full" />
+                </div>
+              </div>
             ) : (
               <PriceRequestForm
                 key={priceEditingId ?? `new-${priceProductId}`}

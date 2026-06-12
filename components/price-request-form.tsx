@@ -103,7 +103,9 @@ function VariantOptionSection({
           ))}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">None</p>
+        <p className="text-sm text-muted-foreground">
+          {readOnly ? 'None' : `No ${title.toLowerCase()} pricing configured yet — add some above.`}
+        </p>
       )}
     </section>
   )
@@ -327,7 +329,9 @@ export function PriceRequestForm({
             </div>
           )
         ) : (
-          <p className="text-sm text-muted-foreground">None</p>
+          <p className="text-sm text-muted-foreground">
+            {readOnly ? 'None' : 'No quantity slabs configured yet — add one above.'}
+          </p>
         )}
       </section>
 

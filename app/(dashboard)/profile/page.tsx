@@ -12,6 +12,9 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
 import { SignatureCanvas } from '@/components/signature-canvas'
 
 const CLOUD_NAME    = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME    ?? ''
@@ -91,6 +94,7 @@ interface PrinterProfile {
   printer_locations: PrinterLocation[]
   printer_bank_details: BankDetails | null
   user: { email: string; phone: string; full_name: string } | null
+  legal_terms?: string | null
 }
 
 interface ProfileResponse { data: PrinterProfile }
@@ -166,6 +170,8 @@ export default function ProfilePage() {
   const [sigAgreed, setSigAgreed] = useState(false)
   const [sigSigned, setSigSigned] = useState(false)
   const [sigSaving, setSigSaving] = useState(false)
+  const [legalHtml, setLegalHtml] = useState('')
+  const [legalLoading, setLegalLoading] = useState(true)
   const sigCanvasRef = useRef<HTMLCanvasElement>(null)
 
   const descEditor = useEditor({
@@ -199,9 +205,13 @@ export default function ProfilePage() {
           upi_id: bank.upi_id ?? '',
         })
         descEditor?.commands.setContent(d.description ?? '')
+        setLegalHtml(d.legal_terms ?? '')
       })
       .catch(err => toast.error(err.message ?? 'Failed to load profile'))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        setLoading(false)
+        setLegalLoading(false)
+      })
   }, [descEditor])
 
   async function saveBasicInfo() {
@@ -525,37 +535,12 @@ export default function ProfilePage() {
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-3">
                 <CardTitle className="text-base">Agreement Signature</CardTitle>
-                {!sigEdit && (
-                  <Button size="sm" variant="outline" onClick={() => { setSigEdit(true); setSigAgreed(false); setSigSigned(false) }}>
-                    {profile.signature_data ? 'Re-sign' : 'Sign Agreement'}
-                  </Button>
-                )}
+                <Button size="sm" variant="outline" onClick={() => { setSigEdit(true); setSigAgreed(false); setSigSigned(false) }}>
+                  {profile.signature_data ? 'Re-sign' : 'Sign Agreement'}
+                </Button>
               </CardHeader>
               <CardContent className="text-sm space-y-4">
-                {sigEdit ? (
-                  <div className="space-y-4">
-                    <label className="flex items-start gap-3 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
-                        checked={sigAgreed}
-                        onChange={e => setSigAgreed(e.target.checked)}
-                        className="mt-0.5 h-4 w-4 rounded border-input accent-primary cursor-pointer shrink-0"
-                      />
-                      <span className="text-sm font-medium leading-snug">
-                        I have read and agree to the terms and conditions
-                      </span>
-                    </label>
-                    {sigAgreed && (
-                      <SignatureCanvas canvasRef={sigCanvasRef} onSigned={setSigSigned} />
-                    )}
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="outline" onClick={() => setSigEdit(false)} disabled={sigSaving}>Cancel</Button>
-                      <Button size="sm" onClick={saveAgreement} disabled={sigSaving || !sigAgreed || !sigSigned}>
-                        {sigSaving ? 'Saving…' : 'Submit Signature'}
-                      </Button>
-                    </div>
-                  </div>
-                ) : profile.signature_data ? (
+                {profile.signature_data ? (
                   <div className="space-y-2">
                     <div className="rounded-lg border bg-muted/30 p-3 flex items-center justify-center">
                       <img src={profile.signature_data} alt="Signature" className="max-h-32 object-contain" />
@@ -571,6 +556,55 @@ export default function ProfilePage() {
                 )}
               </CardContent>
             </Card>
+
+            <Dialog open={sigEdit} onOpenChange={open => { if (!sigSaving) setSigEdit(open) }}>
+              <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+                <DialogHeader>
+                  <DialogTitle>{profile.signature_data ? 'Re-sign agreement' : 'Sign agreement'}</DialogTitle>
+                </DialogHeader>
+
+                <div className="flex-1 overflow-y-auto space-y-4 -mx-1 px-1">
+                  {legalLoading ? (
+                    <div className="h-48 rounded-lg border bg-muted animate-pulse" />
+                  ) : legalHtml ? (
+                    <div
+                      className="max-h-72 overflow-y-auto rounded-lg border bg-white px-5 py-4 text-sm prose prose-sm max-w-none"
+                      dangerouslySetInnerHTML={{ __html: legalHtml }}
+                    />
+                  ) : (
+                    <div className="rounded-lg border bg-muted/40 px-5 py-4 text-sm text-muted-foreground">
+                      No legal terms have been configured yet. Please contact the administrator.
+                    </div>
+                  )}
+
+                  <label className="flex items-start gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={sigAgreed}
+                      onChange={e => setSigAgreed(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-input accent-primary cursor-pointer shrink-0"
+                    />
+                    <span className="text-sm font-medium leading-snug">
+                      I have read and agree to the above terms and conditions
+                    </span>
+                  </label>
+
+                  {sigAgreed && (
+                    <div className="space-y-3 pt-1">
+                      <div className="h-px bg-border" />
+                      <SignatureCanvas canvasRef={sigCanvasRef} onSigned={setSigSigned} />
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setSigEdit(false)} disabled={sigSaving}>Cancel</Button>
+                  <Button onClick={saveAgreement} disabled={sigSaving || !sigAgreed || !sigSigned}>
+                    {sigSaving ? 'Saving…' : 'Submit Signature'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             {/* Change Password */}
             <Card>
