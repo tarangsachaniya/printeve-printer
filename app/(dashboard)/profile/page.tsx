@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -580,15 +581,15 @@ export default function ProfilePage() {
                 <CardContent className="text-sm space-y-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="old-pw">Current Password</Label>
-                    <Input id="old-pw" type="password" value={pwForm.old_password} onChange={e => setPwForm(f => ({ ...f, old_password: e.target.value }))} placeholder="••••••••" />
+                    <PasswordInput id="old-pw" value={pwForm.old_password} onChange={e => setPwForm(f => ({ ...f, old_password: e.target.value }))} placeholder="••••••••" />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="new-pw">New Password</Label>
-                    <Input id="new-pw" type="password" value={pwForm.new_password} onChange={e => setPwForm(f => ({ ...f, new_password: e.target.value }))} placeholder="Min. 8 chars, uppercase, number, symbol" />
+                    <PasswordInput id="new-pw" value={pwForm.new_password} onChange={e => setPwForm(f => ({ ...f, new_password: e.target.value }))} placeholder="Min. 8 chars, uppercase, number, symbol" />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="confirm-pw">Confirm New Password</Label>
-                    <Input id="confirm-pw" type="password" value={pwForm.confirm} onChange={e => setPwForm(f => ({ ...f, confirm: e.target.value }))} placeholder="Repeat new password" />
+                    <PasswordInput id="confirm-pw" value={pwForm.confirm} onChange={e => setPwForm(f => ({ ...f, confirm: e.target.value }))} placeholder="Repeat new password" />
                   </div>
                   {pwError && <p className="text-sm text-destructive">{pwError}</p>}
                 </CardContent>

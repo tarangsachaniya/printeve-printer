@@ -6,6 +6,7 @@ import { api } from '@/lib/api'
 import { validatePassword } from '@/lib/password'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
 import { SignatureCanvas } from '@/components/signature-canvas'
 import { useBootstrap } from '@/context/bootstrap-context'
@@ -218,15 +219,15 @@ export default function SetupPage() {
             <div className="space-y-4">
               <div className="space-y-1.5">
                 <Label>Current Password</Label>
-                <Input type="password" value={oldPassword} onChange={e => setOldPassword(e.target.value)} placeholder="••••••••" />
+                <PasswordInput value={oldPassword} onChange={e => setOldPassword(e.target.value)} placeholder="••••••••" />
               </div>
               <div className="space-y-1.5">
-                <Label>New Password</Label>
-                <Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 8 chars, uppercase, number, symbol" />
+                <label className="text-sm font-medium">New Password</label>
+                <PasswordInput value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 8 chars, uppercase, number, symbol" />
               </div>
               <div className="space-y-1.5">
-                <Label>Confirm New Password</Label>
-                <Input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat new password" />
+                <label className="text-sm font-medium">Confirm New Password</label>
+                <PasswordInput value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat new password" />
               </div>
             </div>
           )}
