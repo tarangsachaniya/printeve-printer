@@ -15,6 +15,7 @@ import {
   ProductRequestForm,
   type ProductRequestPayload,
   type ProductRequestInitial,
+  type CategoryOption,
 } from '@/components/product-request-form'
 import {
   PriceRequestForm,
@@ -37,6 +38,7 @@ interface ProductsListMeta {
   sizes: PaperSizeMeta[]
   qualities: PaperQualityMeta[]
   types: PaperTypeMeta[]
+  categories: CategoryOption[]
   product_requests: ProductRequestListItem[]
   price_requests: PriceRequestMetaItem[]
 }
@@ -115,6 +117,7 @@ export default function ProductsPage() {
   const [paperSizes, setPaperSizes] = useState<PaperSizeMeta[]>([])
   const [paperQualities, setPaperQualities] = useState<PaperQualityMeta[]>([])
   const [paperTypes, setPaperTypes] = useState<PaperTypeMeta[]>([])
+  const [categories, setCategories] = useState<CategoryOption[]>([])
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
 
@@ -152,6 +155,7 @@ export default function ProductsPage() {
         setPaperSizes(prods.meta?.sizes ?? [])
         setPaperQualities(prods.meta?.qualities ?? [])
         setPaperTypes(prods.meta?.types ?? [])
+        setCategories(prods.meta?.categories ?? [])
         setRequests(prods.meta?.product_requests ?? [])
 
         const productById = new Map(items.map(p => [p.id, p]))
@@ -542,6 +546,7 @@ export default function ProductsPage() {
                 submitLabel={isNew ? 'Submit for review' : 'Save changes'}
                 paperSizes={paperSizes}
                 paperTypes={paperTypes}
+                categories={categories}
               />
             )}
           </div>

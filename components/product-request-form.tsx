@@ -5,6 +5,7 @@ import { PlusIcon, VideoIcon, XIcon, UploadIcon } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { toast } from 'sonner'
+import { api } from '@/lib/api'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,6 +24,7 @@ export interface ProductRequestPayload {
   name: string
   base_price: number
   description: string | null
+  category_id: string | null
   paper_sizes: { paper_size_id: string; price_modifier: number }[]
   paper_types: { paper_type_id: string; price_modifier: number }[]
   quantity_slabs: QuantitySlabEntry[]
@@ -34,6 +36,7 @@ export interface ProductRequestInitial {
   name?: string
   base_price?: number
   description?: string | null
+  category_id?: string | null
   paper_sizes?: { paper_size_id: string; price_modifier: number; name?: string }[]
   paper_types?: { paper_type_id: string; price_modifier: number; name?: string }[]
   quantity_slabs?: QuantitySlabEntry[]
@@ -43,6 +46,7 @@ export interface ProductRequestInitial {
 
 interface PaperSize { id: string; name: string }
 interface PaperTypeOption { id: string; name: string }
+export interface CategoryOption { id: string; name: string }
 
 // Display row carries the master-option id, its name (for label), and the modifier amount as a string for editing
 type OptionEntry = { id: string; name: string; price_modifier: string }
@@ -116,6 +120,7 @@ export function buildProductRequestPayload(
   name: string,
   basePrice: string,
   descHtml: string,
+  categoryId: string,
   paperSizesSel: OptionEntry[],
   paperTypesSel: OptionEntry[],
   qtySlabs: QtySlab[],
@@ -126,6 +131,7 @@ export function buildProductRequestPayload(
     name: name.trim(),
     base_price: Number(basePrice),
     description: descHtml || null,
+    category_id: categoryId || null,
     paper_sizes: paperSizesSel.map(s => ({ paper_size_id: s.id, price_modifier: Number(s.price_modifier) || 0 })),
     paper_types: paperTypesSel.map(t => ({ paper_type_id: t.id, price_modifier: Number(t.price_modifier) || 0 })),
     quantity_slabs: qtySlabs.map(s => ({
@@ -205,6 +211,7 @@ export function ProductRequestForm({
   hideSubmit = false,
   paperSizes = [],
   paperTypes: paperTypeOptions = [],
+  categories: categoriesProp = [],
 }: {
   initial?: ProductRequestInitial
   readOnly?: boolean
@@ -215,9 +222,14 @@ export function ProductRequestForm({
   hideSubmit?: boolean
   paperSizes?: PaperSize[]
   paperTypes?: PaperTypeOption[]
+  categories?: CategoryOption[]
 }) {
   const [name, setName] = useState(initial?.name ?? '')
   const [basePrice, setBasePrice] = useState(initial?.base_price != null ? String(initial.base_price) : '')
+  const [categories, setCategories] = useState<CategoryOption[]>(categoriesProp)
+  const [categoryId, setCategoryId] = useState(initial?.category_id ?? '')
+  const [newCategoryName, setNewCategoryName] = useState('')
+  const [addingCategory, setAddingCategory] = useState(false)
   const [paperSizesSel, setPaperSizesSel] = useState<OptionEntry[]>(
     (initial?.paper_sizes ?? []).map(s => ({ id: s.paper_size_id, name: s.name ?? '', price_modifier: String(s.price_modifier) })),
   )
@@ -268,6 +280,26 @@ export function ProductRequestForm({
     if (initial?.description != null && descEditor)
       descEditor.commands.setContent(initial.description)
   }, [initial?.description, descEditor])
+
+  useEffect(() => {
+    setCategories(categoriesProp)
+  }, [categoriesProp])
+
+  async function addCategory() {
+    const val = newCategoryName.trim()
+    if (!val) return
+    setAddingCategory(true)
+    try {
+      const res = await api.post<{ data: CategoryOption }>('/printer/categories', { name: val })
+      if (res.data) {
+        setCategories(prev => [...prev, res.data])
+        setCategoryId(res.data.id)
+      }
+      setNewCategoryName('')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add category')
+    } finally { setAddingCategory(false) }
+  }
 
   const availableSizes = paperSizes.filter(s => !paperSizesSel.some(x => x.id === s.id))
   const availableTypes = paperTypeOptions.filter(t => !paperTypesSel.some(x => x.id === t.id))
@@ -328,7 +360,7 @@ export function ProductRequestForm({
     e.preventDefault()
     if (!onSubmit || readOnly) return
     const payload = buildProductRequestPayload(
-      name, basePrice, getDescriptionHtml(), paperSizesSel,
+      name, basePrice, getDescriptionHtml(), categoryId, paperSizesSel,
       paperTypesSel, qtySlabs, images, videoUrl,
     )
     onSubmit(payload)
@@ -350,6 +382,37 @@ export function ProductRequestForm({
         <div className="space-y-1.5">
           <Label>Base price (₹) *</Label>
           <Input type="number" value={basePrice} onChange={e => setBasePrice(e.target.value)} disabled={disabled} required />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Category</Label>
+          {readOnly ? (
+            <p className="text-sm text-muted-foreground">
+              {categories.find(c => c.id === categoryId)?.name ?? 'No category'}
+            </p>
+          ) : (
+            <>
+              <Combobox
+                options={categories.map(c => ({ value: c.id, label: c.name }))}
+                value={categoryId}
+                onValueChange={setCategoryId}
+                placeholder="Select category…"
+                searchPlaceholder="Search categories…"
+              />
+              <div className="flex items-center gap-2 pt-1">
+                <Input
+                  className="flex-1"
+                  placeholder="Add new category…"
+                  value={newCategoryName}
+                  onChange={e => setNewCategoryName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addCategory())}
+                  disabled={disabled}
+                />
+                <Button type="button" variant="outline" size="sm" onClick={addCategory} disabled={disabled || addingCategory || !newCategoryName.trim()}>
+                  <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add
+                </Button>
+              </div>
+            </>
+          )}
         </div>
       </section>
 
