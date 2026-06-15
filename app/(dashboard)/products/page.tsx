@@ -22,6 +22,7 @@ import {
   type PriceRequestPayload,
   type PriceRequestInitial,
 } from '@/components/price-request-form'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface Product {
   id: string
@@ -120,6 +121,8 @@ export default function ProductsPage() {
   const [categories, setCategories] = useState<CategoryOption[]>([])
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
+  const [deselectId, setDeselectId] = useState<string | null>(null)
+  const [deselecting, setDeselecting] = useState(false)
 
   // --- product request sheet ---
   const [sheetOpen, setSheetOpen] = useState(false)
@@ -503,7 +506,7 @@ export default function ProductsPage() {
                     size="sm"
                     variant={product.selected ? 'outline' : 'default'}
                     disabled={toggling === product.id}
-                    onClick={() => toggle(product)}
+                    onClick={() => product.selected ? setDeselectId(product.id) : toggle(product)}
                   >
                     {toggling === product.id ? '…' : product.selected ? 'Remove' : 'Add'}
                   </Button>
@@ -685,6 +688,26 @@ export default function ProductsPage() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+
+      <ConfirmDialog
+        open={deselectId !== null}
+        onOpenChange={(open) => !open && setDeselectId(null)}
+        title="Remove product?"
+        description="This product will be removed from your catalog and customers will no longer be able to order it."
+        confirmLabel="Remove"
+        loading={deselecting}
+        onConfirm={async () => {
+          const product = products.find(p => p.id === deselectId)
+          if (!product) { setDeselectId(null); return }
+          setDeselecting(true)
+          try {
+            await toggle(product)
+          } finally {
+            setDeselecting(false)
+            setDeselectId(null)
+          }
+        }}
+      />
     </div>
   )
 }
