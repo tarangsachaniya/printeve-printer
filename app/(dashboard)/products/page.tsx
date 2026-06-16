@@ -21,6 +21,7 @@ import {
   PriceRequestForm,
   type PriceRequestPayload,
   type PriceRequestInitial,
+  type CustomFieldDef,
 } from '@/components/price-request-form'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
@@ -64,6 +65,11 @@ interface ProductDetail {
     max_qty: number | null
     price_modifier: number
     max_completion_minutes: number | null
+  }[]
+  custom_fields?: {
+    category_field_id: string
+    label: string
+    options: { id: string; name: string; price_modifier: number }[]
   }[]
 }
 
@@ -109,6 +115,16 @@ interface PriceRequestDetail extends PriceRequestInitial {
   product_name: string | null
   status: 'pending' | 'approved' | 'rejected'
   admin_notes?: string | null
+  variant_config?: {
+    paper_sizes?: { paper_size_id: string; price_modifier: number }[]
+    paper_qualities?: { paper_quality_id: string; price_modifier: number }[]
+    paper_types?: { paper_type_id: string; price_modifier: number }[]
+    quantity_slabs?: { min_qty: number; max_qty: number | null; price_modifier: number; max_completion_minutes: number | null }[]
+    custom_field_options?: { category_field_id: string; field_option_value_id: string; price_modifier: number }[]
+  }
+  current_variant_config?: {
+    custom_fields?: { category_field_id: string; label: string; options: { id: string; name: string; price_modifier: number }[] }[]
+  }
 }
 
 export default function ProductsPage() {
@@ -147,6 +163,7 @@ export default function ProductsPage() {
   const [priceProductName, setPriceProductName] = useState<string>('')
   const [loadingPriceDetail, setLoadingPriceDetail] = useState(false)
   const [savingPrice, setSavingPrice] = useState(false)
+  const [priceCustomFields, setPriceCustomFields] = useState<CustomFieldDef[]>([])
   const priceDetailCache = useRef(new Map<string, PriceRequestDetail>())
 
   function load() {
@@ -270,6 +287,7 @@ export default function ProductsPage() {
     setPriceInitial(undefined)
     setPriceProductId('')
     setPriceProductName('')
+    setPriceCustomFields([])
   }
 
   async function openPriceRequestForProduct(product: Product) {
@@ -281,12 +299,25 @@ export default function ProductsPage() {
     setLoadingPriceDetail(true)
     try {
       const res = await api.get<{ data: ProductDetail }>(`/printer/products/${product.id}`)
+      const customFields = (res.data.custom_fields ?? []).map(cf => ({
+        category_field_id: cf.category_field_id,
+        label: cf.label,
+        options: cf.options.map(o => ({ id: o.id, name: o.name })),
+      }))
+      setPriceCustomFields(customFields)
       setPriceInitial({
         base_price: res.data.base_price,
         paper_sizes: res.data.paper_sizes,
         paper_qualities: res.data.paper_qualities,
         paper_types: res.data.paper_types,
         quantity_slabs: res.data.quantity_slabs,
+        custom_field_options: (res.data.custom_fields ?? []).flatMap(cf =>
+          cf.options.map(o => ({
+            category_field_id: cf.category_field_id,
+            field_option_value_id: o.id,
+            price_modifier: o.price_modifier,
+          }))
+        ),
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load product pricing')
@@ -305,12 +336,19 @@ export default function ProductsPage() {
     const cached = priceDetailCache.current.get(item.id)
     if (cached) {
       setPriceRequestDetail(cached)
+      const cachedCustomFields = (cached.current_variant_config?.custom_fields ?? []).map(cf => ({
+        category_field_id: cf.category_field_id,
+        label: cf.label,
+        options: cf.options.map(o => ({ id: o.id, name: o.name })),
+      }))
+      setPriceCustomFields(cachedCustomFields)
       setPriceInitial({
         base_price: cached.base_price,
         paper_sizes: cached.paper_sizes,
         paper_qualities: cached.paper_qualities,
         paper_types: cached.paper_types,
         quantity_slabs: cached.quantity_slabs,
+        custom_field_options: cached.variant_config?.custom_field_options ?? [],
         notes: cached.notes,
       })
       if (cached.product_id) setPriceProductId(cached.product_id)
@@ -321,12 +359,19 @@ export default function ProductsPage() {
       const res = await api.get<{ data: PriceRequestDetail }>(`/printer/product-price-requests/${item.id}`)
       priceDetailCache.current.set(item.id, res.data)
       setPriceRequestDetail(res.data)
+      const currentCustomFields = (res.data.current_variant_config?.custom_fields ?? []).map(cf => ({
+        category_field_id: cf.category_field_id,
+        label: cf.label,
+        options: cf.options.map(o => ({ id: o.id, name: o.name })),
+      }))
+      setPriceCustomFields(currentCustomFields)
       setPriceInitial({
         base_price: res.data.base_price,
         paper_sizes: res.data.paper_sizes,
         paper_qualities: res.data.paper_qualities,
         paper_types: res.data.paper_types,
         quantity_slabs: res.data.quantity_slabs,
+        custom_field_options: res.data.variant_config?.custom_field_options ?? [],
         notes: res.data.notes,
       })
       if (res.data.product_id) setPriceProductId(res.data.product_id)
@@ -619,6 +664,7 @@ export default function ProductsPage() {
                 paperSizes={paperSizes}
                 paperQualities={paperQualities}
                 paperTypes={paperTypes}
+                customFields={priceCustomFields}
               />
             )}
           </div>

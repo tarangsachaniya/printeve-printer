@@ -16,6 +16,18 @@ export interface QuantitySlabEntry {
   max_completion_minutes: number | null
 }
 
+export interface CustomFieldOptionInput {
+  category_field_id: string
+  field_option_value_id: string
+  price_modifier: number
+}
+
+export interface CustomFieldDef {
+  category_field_id: string
+  label: string
+  options: { id: string; name: string }[]
+}
+
 export interface PriceRequestPayload {
   product_id: string
   base_price: number
@@ -23,6 +35,7 @@ export interface PriceRequestPayload {
   paper_qualities: { paper_quality_id: string; price_modifier: number }[]
   paper_types: { paper_type_id: string; price_modifier: number }[]
   quantity_slabs: QuantitySlabEntry[]
+  custom_field_options: CustomFieldOptionInput[]
   notes: string | null
 }
 
@@ -32,6 +45,7 @@ export interface PriceRequestInitial {
   paper_qualities?: { paper_quality_id: string; price_modifier: number; name?: string }[]
   paper_types?: { paper_type_id: string; price_modifier: number; name?: string }[]
   quantity_slabs?: QuantitySlabEntry[]
+  custom_field_options?: CustomFieldOptionInput[]
   notes?: string | null
 }
 
@@ -122,6 +136,7 @@ export function PriceRequestForm({
   paperSizes = [],
   paperQualities: paperQualitiesRaw = [],
   paperTypes: paperTypeOptions = [],
+  customFields = [],
 }: {
   productId: string
   initial?: PriceRequestInitial
@@ -133,6 +148,7 @@ export function PriceRequestForm({
   paperSizes?: PaperSize[]
   paperQualities?: { id: string; gsm: number; label: string | null }[]
   paperTypes?: PaperTypeOption[]
+  customFields?: CustomFieldDef[]
 }) {
   const paperQualities = useMemo<PaperQuality[]>(() => paperQualitiesRaw.map(q => ({
     id: q.id,
@@ -154,6 +170,11 @@ export function PriceRequestForm({
   const [pendingSize, setPendingSize] = useState('')
   const [pendingQuality, setPendingQuality] = useState('')
   const [pendingType, setPendingType] = useState('')
+  const [customFieldModifiers, setCustomFieldModifiers] = useState<Record<string, string>>(() => {
+    const mods: Record<string, string> = {}
+    for (const o of initial?.custom_field_options ?? []) mods[o.field_option_value_id] = String(o.price_modifier)
+    return mods
+  })
 
   // re-sync when initial changes (e.g. loaded after mount)
   useEffect(() => {
@@ -164,6 +185,9 @@ export function PriceRequestForm({
     setPaperTypesSel((initial.paper_types ?? []).map(t => ({ id: t.paper_type_id, name: t.name ?? '', price_modifier: String(t.price_modifier) })))
     setQtySlabs(toQtySlabs(initial.quantity_slabs))
     setNotes(initial.notes ?? '')
+    const mods: Record<string, string> = {}
+    for (const o of initial.custom_field_options ?? []) mods[o.field_option_value_id] = String(o.price_modifier)
+    setCustomFieldModifiers(mods)
   }, [initial])
 
   const availableSizes = paperSizes.filter(s => !paperSizesSel.some(x => x.id === s.id))
@@ -185,6 +209,13 @@ export function PriceRequestForm({
         price_modifier: Number(s.price_modifier) || 0,
         max_completion_minutes: s.max_completion_minutes ? Number(s.max_completion_minutes) : null,
       })),
+      custom_field_options: customFields.flatMap(cf =>
+        cf.options.map(opt => ({
+          category_field_id: cf.category_field_id,
+          field_option_value_id: opt.id,
+          price_modifier: Number(customFieldModifiers[opt.id] || 0),
+        }))
+      ),
       notes: notes.trim() || null,
     })
   }
@@ -334,6 +365,36 @@ export function PriceRequestForm({
           </p>
         )}
       </section>
+
+      {customFields.length > 0 && customFields.map(cf => (
+        <section key={cf.category_field_id} className="space-y-3">
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{cf.label}</p>
+            <InfoTooltip text="Enter how much to add (+) or subtract (-) from the base price per unit for each option." />
+          </div>
+          {cf.options.length > 0 ? (
+            <div className="rounded-md border divide-y">
+              {cf.options.map(opt => (
+                <div key={opt.id} className="flex items-center gap-3 px-3 py-2">
+                  <span className="text-sm font-medium w-28 shrink-0 truncate">{opt.name}</span>
+                  <div className="relative flex-1">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">+/- ₹</span>
+                    <Input
+                      type="number"
+                      className="pl-12"
+                      value={customFieldModifiers[opt.id] ?? ''}
+                      disabled={disabled}
+                      onChange={e => setCustomFieldModifiers(p => ({ ...p, [opt.id]: e.target.value }))}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No options configured.</p>
+          )}
+        </section>
+      ))}
 
       <section className="space-y-1.5">
         <div className="flex items-center gap-1.5">
