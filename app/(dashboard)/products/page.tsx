@@ -217,6 +217,8 @@ export default function ProductsPage() {
       const vc = (raw.variant_config as Record<string, unknown> | null) ?? {}
       const detail: ProductRequestDetail = {
         ...(raw as Partial<ProductRequestDetail>),
+        id,
+        status: (raw.status as ProductRequestDetail['status']) ?? 'pending',
         paper_sizes: (vc.paper_sizes as ProductRequestDetail['paper_sizes']) ?? [],
         paper_types: (vc.paper_types as ProductRequestDetail['paper_types']) ?? [],
         quantity_slabs: (vc.quantity_slabs as ProductRequestDetail['quantity_slabs']) ?? [],
