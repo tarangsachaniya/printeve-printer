@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { PlusIcon, VideoIcon, XIcon, UploadIcon } from 'lucide-react'
+import { PlusIcon, VideoIcon, XIcon, UploadIcon, GripVerticalIcon, ChevronDownIcon } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { toast } from 'sonner'
@@ -20,37 +20,78 @@ export interface QuantitySlabEntry {
   max_completion_minutes: number | null
 }
 
+export interface FieldOptionValueCatalog {
+  id: string
+  value: string
+  sort_order: number
+}
+
+export interface FieldDefCatalog {
+  id: string
+  key: string
+  label: string
+  field_type: 'select' | 'multi_select' | 'boolean' | 'number' | 'text' | 'textarea' | 'file_upload' | 'radio'
+  field_option_values: FieldOptionValueCatalog[]
+}
+
+interface ProductFieldEntry {
+  field_definition_id: string
+  label: string
+  field_type: FieldDefCatalog['field_type']
+  field_option_values: FieldOptionValueCatalog[]
+  is_required: boolean
+}
+
+interface CustomFieldOptionEntry {
+  field_option_value_id: string
+  price_modifier: string
+  is_default: boolean
+}
+
 export interface ProductRequestPayload {
   name: string
   base_price: number
   description: string | null
-  category_id: string | null
   paper_sizes: { paper_size_id: string; price_modifier: number }[]
   paper_types: { paper_type_id: string; price_modifier: number }[]
   quantity_slabs: QuantitySlabEntry[]
   images: string[]
   video_url: string | null
+  product_fields: { field_definition_id: string; sort_order: number; is_required: boolean }[]
+  custom_field_options: { field_definition_id: string; field_option_value_id: string; price_modifier: number; is_default: boolean }[]
 }
 
 export interface ProductRequestInitial {
   name?: string
   base_price?: number
   description?: string | null
-  category_id?: string | null
   paper_sizes?: { paper_size_id: string; price_modifier: number; name?: string }[]
   paper_types?: { paper_type_id: string; price_modifier: number; name?: string }[]
   quantity_slabs?: QuantitySlabEntry[]
   images?: string[]
   video_url?: string | null
+  product_fields?: { field_definition_id: string; sort_order?: number; is_required?: boolean }[]
+  custom_field_options?: { field_definition_id: string; field_option_value_id: string; price_modifier: number; is_default: boolean }[]
 }
 
 interface PaperSize { id: string; name: string }
 interface PaperTypeOption { id: string; name: string }
-export interface CategoryOption { id: string; name: string }
 
-// Display row carries the master-option id, its name (for label), and the modifier amount as a string for editing
 type OptionEntry = { id: string; name: string; price_modifier: string }
 type QtySlab = { min_qty: string; max_qty: string; unit_price: string; max_completion_minutes: string }
+
+const FIELD_TYPES = [
+  { value: 'select',       label: 'Dropdown (select)' },
+  { value: 'radio',        label: 'Radio buttons' },
+  { value: 'multi_select', label: 'Multi-select checkboxes' },
+  { value: 'boolean',      label: 'Yes / No (boolean)' },
+  { value: 'text',         label: 'Text input' },
+  { value: 'number',       label: 'Number input' },
+  { value: 'textarea',     label: 'Text area' },
+  { value: 'file_upload',  label: 'File upload' },
+]
+
+const OPTION_FIELD_TYPES = new Set(['select', 'multi_select', 'boolean', 'radio'])
 
 function ToolbarButton({
   onClick, active, disabled, children,
@@ -120,18 +161,18 @@ export function buildProductRequestPayload(
   name: string,
   basePrice: string,
   descHtml: string,
-  categoryId: string,
   paperSizesSel: OptionEntry[],
   paperTypesSel: OptionEntry[],
   qtySlabs: QtySlab[],
   images: string[],
   videoUrl: string,
+  productFields: ProductFieldEntry[],
+  customFieldOptionSel: Record<string, CustomFieldOptionEntry[]>,
 ): ProductRequestPayload {
   return {
     name: name.trim(),
     base_price: Number(basePrice),
     description: descHtml || null,
-    category_id: categoryId || null,
     paper_sizes: paperSizesSel.map(s => ({ paper_size_id: s.id, price_modifier: Number(s.price_modifier) || 0 })),
     paper_types: paperTypesSel.map(t => ({ paper_type_id: t.id, price_modifier: Number(t.price_modifier) || 0 })),
     quantity_slabs: qtySlabs.map(s => ({
@@ -142,6 +183,20 @@ export function buildProductRequestPayload(
     })),
     images,
     video_url: videoUrl || null,
+    product_fields: productFields.map((f, i) => ({
+      field_definition_id: f.field_definition_id,
+      sort_order: i,
+      is_required: f.is_required,
+    })),
+    custom_field_options: productFields.flatMap(f => {
+      const opts = customFieldOptionSel[f.field_definition_id] ?? []
+      return opts.map(e => ({
+        field_definition_id: f.field_definition_id,
+        field_option_value_id: e.field_option_value_id,
+        price_modifier: Number(e.price_modifier) || 0,
+        is_default: e.is_default,
+      }))
+    }),
   }
 }
 
@@ -211,7 +266,6 @@ export function ProductRequestForm({
   hideSubmit = false,
   paperSizes = [],
   paperTypes: paperTypeOptions = [],
-  categories: categoriesProp = [],
 }: {
   initial?: ProductRequestInitial
   readOnly?: boolean
@@ -222,14 +276,9 @@ export function ProductRequestForm({
   hideSubmit?: boolean
   paperSizes?: PaperSize[]
   paperTypes?: PaperTypeOption[]
-  categories?: CategoryOption[]
 }) {
   const [name, setName] = useState(initial?.name ?? '')
   const [basePrice, setBasePrice] = useState(initial?.base_price != null ? String(initial.base_price) : '')
-  const [categories, setCategories] = useState<CategoryOption[]>(categoriesProp)
-  const [categoryId, setCategoryId] = useState(initial?.category_id ?? '')
-  const [newCategoryName, setNewCategoryName] = useState('')
-  const [addingCategory, setAddingCategory] = useState(false)
   const [paperSizesSel, setPaperSizesSel] = useState<OptionEntry[]>(
     (initial?.paper_sizes ?? []).map(s => ({ id: s.paper_size_id, name: s.name ?? '', price_modifier: String(s.price_modifier) })),
   )
@@ -257,6 +306,134 @@ export function ProductRequestForm({
   const imgInputRef = useRef<HTMLInputElement>(null)
   const vidInputRef = useRef<HTMLInputElement>(null)
 
+  // --- custom fields ---
+  const [fieldCatalog, setFieldCatalog] = useState<FieldDefCatalog[]>([])
+  const [productFields, setProductFields] = useState<ProductFieldEntry[]>([])
+  const [customFieldOptionSel, setCustomFieldOptionSel] = useState<Record<string, CustomFieldOptionEntry[]>>({})
+  const [pendingField, setPendingField] = useState('')
+  const [creatingField, setCreatingField] = useState(false)
+  const [newFieldKey, setNewFieldKey] = useState('')
+  const [newFieldLabel, setNewFieldLabel] = useState('')
+  const [newFieldType, setNewFieldType] = useState('select')
+  const [newFieldOptions, setNewFieldOptions] = useState('')
+  const [savingField, setSavingField] = useState(false)
+  const dragFieldIndexRef = useRef<number | null>(null)
+  const [fieldDragOver, setFieldDragOver] = useState<number | null>(null)
+
+  useEffect(() => {
+    api.get<{ items: FieldDefCatalog[] }>('/printer/field-definitions')
+      .then(res => {
+        const catalog = res.items ?? []
+        setFieldCatalog(catalog)
+        // Initialize product fields from initial after catalog is available
+        const initFields = initial?.product_fields ?? []
+        if (initFields.length > 0) {
+          setProductFields(initFields.map(f => {
+            const def = catalog.find(d => d.id === f.field_definition_id)
+            return {
+              field_definition_id: f.field_definition_id,
+              label: def?.label ?? f.field_definition_id,
+              field_type: def?.field_type ?? 'text',
+              field_option_values: def?.field_option_values ?? [],
+              is_required: f.is_required ?? false,
+            }
+          }))
+          const sel: Record<string, CustomFieldOptionEntry[]> = {}
+          for (const opt of initial?.custom_field_options ?? []) {
+            if (!sel[opt.field_definition_id]) sel[opt.field_definition_id] = []
+            sel[opt.field_definition_id].push({
+              field_option_value_id: opt.field_option_value_id,
+              price_modifier: String(opt.price_modifier ?? 0),
+              is_default: opt.is_default ?? false,
+            })
+          }
+          setCustomFieldOptionSel(sel)
+        }
+      })
+      .catch(() => {})
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function addFieldFromCatalog(def: FieldDefCatalog) {
+    if (productFields.some(f => f.field_definition_id === def.id)) return
+    setProductFields(p => [...p, {
+      field_definition_id: def.id,
+      label: def.label,
+      field_type: def.field_type,
+      field_option_values: def.field_option_values,
+      is_required: false,
+    }])
+    if (OPTION_FIELD_TYPES.has(def.field_type) && def.field_option_values.length > 0) {
+      setCustomFieldOptionSel(prev => ({
+        ...prev,
+        [def.id]: def.field_option_values
+          .slice()
+          .sort((a, b) => a.sort_order - b.sort_order)
+          .map((ov, i) => ({
+            field_option_value_id: ov.id,
+            price_modifier: '0',
+            is_default: i === 0,
+          })),
+      }))
+    }
+  }
+
+  async function handleCreateField() {
+    if (!newFieldKey.trim() || !newFieldLabel.trim()) {
+      toast.error('Key and label are required')
+      return
+    }
+    setSavingField(true)
+    try {
+      const hasOptions = OPTION_FIELD_TYPES.has(newFieldType)
+      const options = hasOptions
+        ? newFieldOptions.split('\n').map(s => s.trim()).filter(Boolean)
+        : []
+      const res = await api.post<{ data: FieldDefCatalog & { id: string } }>('/printer/field-definitions', {
+        key: newFieldKey.trim(),
+        label: newFieldLabel.trim(),
+        field_type: newFieldType,
+        options,
+      })
+      // Refresh catalog
+      const updated = await api.get<{ items: FieldDefCatalog[] }>('/printer/field-definitions')
+      const catalog = updated.items ?? []
+      setFieldCatalog(catalog)
+      // Add the new field and auto-select it
+      const newDef = catalog.find(d => d.id === res.data.id) ?? {
+        ...res.data,
+        field_option_values: res.data.field_option_values ?? [],
+      }
+      addFieldFromCatalog(newDef)
+      setCreatingField(false)
+      setNewFieldKey('')
+      setNewFieldLabel('')
+      setNewFieldType('select')
+      setNewFieldOptions('')
+      toast.success('Field type created')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create field type')
+    } finally {
+      setSavingField(false)
+    }
+  }
+
+  function onFieldDragStart(index: number) {
+    dragFieldIndexRef.current = index
+  }
+
+  function onFieldDrop(targetIndex: number) {
+    const from = dragFieldIndexRef.current
+    if (from === null || from === targetIndex) return
+    dragFieldIndexRef.current = null
+    setFieldDragOver(null)
+    setProductFields(prev => {
+      const arr = [...prev]
+      const [moved] = arr.splice(from, 1)
+      arr.splice(targetIndex, 0, moved)
+      return arr
+    })
+  }
+
   const descEditor = useEditor({
     extensions: [StarterKit],
     content: initial?.description ?? '',
@@ -281,28 +458,9 @@ export function ProductRequestForm({
       descEditor.commands.setContent(initial.description)
   }, [initial?.description, descEditor])
 
-  useEffect(() => {
-    setCategories(categoriesProp)
-  }, [categoriesProp])
-
-  async function addCategory() {
-    const val = newCategoryName.trim()
-    if (!val) return
-    setAddingCategory(true)
-    try {
-      const res = await api.post<{ data: CategoryOption }>('/printer/categories', { name: val })
-      if (res.data) {
-        setCategories(prev => [...prev, res.data])
-        setCategoryId(res.data.id)
-      }
-      setNewCategoryName('')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add category')
-    } finally { setAddingCategory(false) }
-  }
-
   const availableSizes = paperSizes.filter(s => !paperSizesSel.some(x => x.id === s.id))
   const availableTypes = paperTypeOptions.filter(t => !paperTypesSel.some(x => x.id === t.id))
+  const availableFieldsForPicker = fieldCatalog.filter(d => !productFields.some(f => f.field_definition_id === d.id))
 
   async function uploadImageFiles(files: File[]) {
     if (!files.length || readOnly) return
@@ -360,8 +518,9 @@ export function ProductRequestForm({
     e.preventDefault()
     if (!onSubmit || readOnly) return
     const payload = buildProductRequestPayload(
-      name, basePrice, getDescriptionHtml(), categoryId, paperSizesSel,
+      name, basePrice, getDescriptionHtml(), paperSizesSel,
       paperTypesSel, qtySlabs, images, videoUrl,
+      productFields, customFieldOptionSel,
     )
     onSubmit(payload)
   }
@@ -382,37 +541,6 @@ export function ProductRequestForm({
         <div className="space-y-1.5">
           <Label>Base price (₹) *</Label>
           <Input type="number" value={basePrice} onChange={e => setBasePrice(e.target.value)} disabled={disabled} required />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Category</Label>
-          {readOnly ? (
-            <p className="text-sm text-muted-foreground">
-              {categories.find(c => c.id === categoryId)?.name ?? 'No category'}
-            </p>
-          ) : (
-            <>
-              <Combobox
-                options={categories.map(c => ({ value: c.id, label: c.name }))}
-                value={categoryId}
-                onValueChange={setCategoryId}
-                placeholder="Select category…"
-                searchPlaceholder="Search categories…"
-              />
-              <div className="flex items-center gap-2 pt-1">
-                <Input
-                  className="flex-1"
-                  placeholder="Add new category…"
-                  value={newCategoryName}
-                  onChange={e => setNewCategoryName(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), addCategory())}
-                  disabled={disabled}
-                />
-                <Button type="button" variant="outline" size="sm" onClick={addCategory} disabled={disabled || addingCategory || !newCategoryName.trim()}>
-                  <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add
-                </Button>
-              </div>
-            </>
-          )}
         </div>
       </section>
 
@@ -604,6 +732,221 @@ export function ProductRequestForm({
             </div>
           </div>
         ))}
+      </section>
+
+      {/* Custom fields */}
+      <section className="space-y-3">
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Custom fields</p>
+          <InfoTooltip text="Add configurable fields customers will see when ordering this product (e.g. Finish, Binding style). You can pick from existing field types or create a new one." />
+        </div>
+
+        {!readOnly && (
+          <div className="space-y-2">
+            <div className="flex gap-2">
+              <div className="flex-1">
+                <Combobox
+                  options={availableFieldsForPicker.map(d => ({ value: d.id, label: `${d.label} (${d.field_type})` }))}
+                  value={pendingField}
+                  onValueChange={v => {
+                    const def = fieldCatalog.find(d => d.id === v)
+                    if (!def) return
+                    addFieldFromCatalog(def)
+                    setPendingField('')
+                  }}
+                  placeholder="Add field from catalog…"
+                  searchPlaceholder="Search field types…"
+                />
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setCreatingField(v => !v)}
+                className="shrink-0"
+              >
+                <PlusIcon className="h-3.5 w-3.5 mr-1" />
+                New type
+                <ChevronDownIcon className={`h-3 w-3 ml-1 transition-transform ${creatingField ? 'rotate-180' : ''}`} />
+              </Button>
+            </div>
+
+            {creatingField && (
+              <div className="rounded-md border bg-muted/30 p-4 space-y-3">
+                <p className="text-xs font-semibold text-muted-foreground">Create new field type</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Key (internal ID) *</Label>
+                    <Input
+                      placeholder="e.g. finishing_type"
+                      value={newFieldKey}
+                      onChange={e => setNewFieldKey(e.target.value)}
+                      disabled={savingField}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Label (shown to customers) *</Label>
+                    <Input
+                      placeholder="e.g. Finishing Type"
+                      value={newFieldLabel}
+                      onChange={e => setNewFieldLabel(e.target.value)}
+                      disabled={savingField}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Field type *</Label>
+                  <select
+                    value={newFieldType}
+                    onChange={e => setNewFieldType(e.target.value)}
+                    disabled={savingField}
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {FIELD_TYPES.map(t => (
+                      <option key={t.value} value={t.value}>{t.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {OPTION_FIELD_TYPES.has(newFieldType) && (
+                  <div className="space-y-1">
+                    <Label className="text-xs">Options (one per line) *</Label>
+                    <textarea
+                      placeholder={'Glossy\nMatte\nKraft'}
+                      value={newFieldOptions}
+                      onChange={e => setNewFieldOptions(e.target.value)}
+                      disabled={savingField}
+                      rows={4}
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring resize-y"
+                    />
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setCreatingField(false)} disabled={savingField}>
+                    Cancel
+                  </Button>
+                  <Button type="button" size="sm" onClick={handleCreateField} disabled={savingField}>
+                    {savingField ? 'Creating…' : 'Create & add'}
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {productFields.length > 0 && (
+          <div className="rounded-md border divide-y">
+            {productFields.map((field, i) => (
+              <div
+                key={field.field_definition_id}
+                draggable={!readOnly}
+                onDragStart={() => onFieldDragStart(i)}
+                onDragOver={e => { e.preventDefault(); setFieldDragOver(i) }}
+                onDragLeave={() => setFieldDragOver(null)}
+                onDrop={() => onFieldDrop(i)}
+                className={`p-3 space-y-2 transition-colors ${fieldDragOver === i ? 'bg-primary/5' : ''}`}
+              >
+                <div className="flex items-center gap-2">
+                  {!readOnly && (
+                    <GripVerticalIcon className="h-4 w-4 text-muted-foreground cursor-grab shrink-0" />
+                  )}
+                  <span className="text-sm font-medium flex-1">{field.label}</span>
+                  <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                    {field.field_type}
+                  </span>
+                  {!readOnly && (
+                    <>
+                      <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={field.is_required}
+                          onChange={e => setProductFields(p => p.map((f, j) => j === i ? { ...f, is_required: e.target.checked } : f))}
+                          className="rounded"
+                        />
+                        Required
+                      </label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => {
+                          setProductFields(p => p.filter((_, j) => j !== i))
+                          setCustomFieldOptionSel(prev => {
+                            const next = { ...prev }
+                            delete next[field.field_definition_id]
+                            return next
+                          })
+                        }}
+                      >
+                        <XIcon className="h-3.5 w-3.5" />
+                      </Button>
+                    </>
+                  )}
+                  {readOnly && field.is_required && (
+                    <span className="text-xs text-destructive">required</span>
+                  )}
+                </div>
+
+                {/* Option list for select/radio/boolean/multi_select */}
+                {OPTION_FIELD_TYPES.has(field.field_type) && field.field_option_values.length > 0 && (
+                  <div className="ml-6 space-y-1">
+                    <p className="text-xs text-muted-foreground mb-1">Options — set price modifier and default:</p>
+                    {(customFieldOptionSel[field.field_definition_id] ?? []).map((entry, oi) => {
+                      const ov = field.field_option_values.find(v => v.id === entry.field_option_value_id)
+                      return (
+                        <div key={entry.field_option_value_id} className="flex items-center gap-2">
+                          {!readOnly && (
+                            <input
+                              type="radio"
+                              name={`default_${field.field_definition_id}`}
+                              checked={entry.is_default}
+                              onChange={() => setCustomFieldOptionSel(prev => ({
+                                ...prev,
+                                [field.field_definition_id]: (prev[field.field_definition_id] ?? []).map((e, ei) => ({
+                                  ...e,
+                                  is_default: ei === oi,
+                                })),
+                              }))}
+                              title="Set as default"
+                              className="shrink-0"
+                            />
+                          )}
+                          <span className="text-xs w-28 shrink-0 truncate">{ov?.value ?? entry.field_option_value_id}</span>
+                          <div className="relative flex-1 max-w-[120px]">
+                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">+/- ₹</span>
+                            <Input
+                              type="number"
+                              className="pl-9 h-7 text-xs"
+                              value={entry.price_modifier}
+                              disabled={readOnly}
+                              onChange={ev => setCustomFieldOptionSel(prev => ({
+                                ...prev,
+                                [field.field_definition_id]: (prev[field.field_definition_id] ?? []).map((e, ei) =>
+                                  ei === oi ? { ...e, price_modifier: ev.target.value } : e
+                                ),
+                              }))}
+                            />
+                          </div>
+                          {entry.is_default && (
+                            <span className="text-xs text-muted-foreground">(default)</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+
+                {/* Read-only display of required flag */}
+                {readOnly && !OPTION_FIELD_TYPES.has(field.field_type) && (
+                  <p className="ml-6 text-xs text-muted-foreground">Customer input — no price options</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {readOnly && productFields.length === 0 && (
+          <p className="text-sm text-muted-foreground">No custom fields</p>
+        )}
       </section>
 
       {onSubmit && !readOnly && !hideSubmit && (

@@ -17,15 +17,21 @@ export interface QuantitySlabEntry {
 }
 
 export interface CustomFieldOptionInput {
-  category_field_id: string
+  product_field_id: string
   field_option_value_id: string
   price_modifier: number
+  is_default?: boolean
 }
 
 export interface CustomFieldDef {
-  category_field_id: string
+  product_field_id: string
   label: string
   options: { id: string; name: string }[]
+}
+
+export interface CityPricingEntry {
+  city_id: string
+  price_modifier: number
 }
 
 export interface PriceRequestPayload {
@@ -36,6 +42,7 @@ export interface PriceRequestPayload {
   paper_types: { paper_type_id: string; price_modifier: number }[]
   quantity_slabs: QuantitySlabEntry[]
   custom_field_options: CustomFieldOptionInput[]
+  city_pricing: CityPricingEntry[]
   notes: string | null
 }
 
@@ -46,15 +53,18 @@ export interface PriceRequestInitial {
   paper_types?: { paper_type_id: string; price_modifier: number; name?: string }[]
   quantity_slabs?: QuantitySlabEntry[]
   custom_field_options?: CustomFieldOptionInput[]
+  city_pricing?: CityPricingEntry[]
   notes?: string | null
 }
 
 interface PaperSize { id: string; name: string }
 interface PaperQuality { id: string; name: string }
 interface PaperTypeOption { id: string; name: string }
+interface CityOption { id: string; name: string; state: string }
 
 type OptionEntry = { id: string; name: string; price_modifier: string }
 type QtySlab = { min_qty: string; max_qty: string; price_modifier: string; max_completion_minutes: string }
+type CityEntry = { city_id: string; city_name: string; price_modifier: string }
 
 function toQtySlabs(slabs?: QuantitySlabEntry[]): QtySlab[] {
   return (slabs ?? []).map(s => ({
@@ -137,6 +147,7 @@ export function PriceRequestForm({
   paperQualities: paperQualitiesRaw = [],
   paperTypes: paperTypeOptions = [],
   customFields = [],
+  cities = [],
 }: {
   productId: string
   initial?: PriceRequestInitial
@@ -149,6 +160,7 @@ export function PriceRequestForm({
   paperQualities?: { id: string; gsm: number; label: string | null }[]
   paperTypes?: PaperTypeOption[]
   customFields?: CustomFieldDef[]
+  cities?: CityOption[]
 }) {
   const paperQualities = useMemo<PaperQuality[]>(() => paperQualitiesRaw.map(q => ({
     id: q.id,
@@ -170,11 +182,30 @@ export function PriceRequestForm({
   const [pendingSize, setPendingSize] = useState('')
   const [pendingQuality, setPendingQuality] = useState('')
   const [pendingType, setPendingType] = useState('')
+
+  // Custom field option modifiers: { [field_option_value_id]: price_modifier string }
   const [customFieldModifiers, setCustomFieldModifiers] = useState<Record<string, string>>(() => {
     const mods: Record<string, string> = {}
     for (const o of initial?.custom_field_options ?? []) mods[o.field_option_value_id] = String(o.price_modifier)
     return mods
   })
+  // Default option per custom field: { [product_field_id]: field_option_value_id }
+  const [customFieldDefaults, setCustomFieldDefaults] = useState<Record<string, string>>(() => {
+    const defs: Record<string, string> = {}
+    for (const o of initial?.custom_field_options ?? []) {
+      if (o.is_default) defs[o.product_field_id] = o.field_option_value_id
+    }
+    return defs
+  })
+
+  // City pricing
+  const [cityPricingSel, setCityPricingSel] = useState<CityEntry[]>(() =>
+    (initial?.city_pricing ?? []).map(c => {
+      const city = cities.find(x => x.id === c.city_id)
+      return { city_id: c.city_id, city_name: city?.name ?? c.city_id, price_modifier: String(c.price_modifier) }
+    })
+  )
+  const [pendingCity, setPendingCity] = useState('')
 
   // re-sync when initial changes (e.g. loaded after mount)
   useEffect(() => {
@@ -186,13 +217,23 @@ export function PriceRequestForm({
     setQtySlabs(toQtySlabs(initial.quantity_slabs))
     setNotes(initial.notes ?? '')
     const mods: Record<string, string> = {}
-    for (const o of initial.custom_field_options ?? []) mods[o.field_option_value_id] = String(o.price_modifier)
+    const defs: Record<string, string> = {}
+    for (const o of initial.custom_field_options ?? []) {
+      mods[o.field_option_value_id] = String(o.price_modifier)
+      if (o.is_default) defs[o.product_field_id] = o.field_option_value_id
+    }
     setCustomFieldModifiers(mods)
-  }, [initial])
+    setCustomFieldDefaults(defs)
+    setCityPricingSel((initial.city_pricing ?? []).map(c => {
+      const city = cities.find(x => x.id === c.city_id)
+      return { city_id: c.city_id, city_name: city?.name ?? c.city_id, price_modifier: String(c.price_modifier) }
+    }))
+  }, [initial]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const availableSizes = paperSizes.filter(s => !paperSizesSel.some(x => x.id === s.id))
   const availableQualities = paperQualities.filter(q => !paperQualitiesSel.some(x => x.id === q.id))
   const availableTypes = paperTypeOptions.filter(t => !paperTypesSel.some(x => x.id === t.id))
+  const availableCities = cities.filter(c => !cityPricingSel.some(x => x.city_id === c.id))
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -211,11 +252,16 @@ export function PriceRequestForm({
       })),
       custom_field_options: customFields.flatMap(cf =>
         cf.options.map(opt => ({
-          category_field_id: cf.category_field_id,
+          product_field_id: cf.product_field_id,
           field_option_value_id: opt.id,
           price_modifier: Number(customFieldModifiers[opt.id] || 0),
+          is_default: (customFieldDefaults[cf.product_field_id] ?? cf.options[0]?.id) === opt.id,
         }))
       ),
+      city_pricing: cityPricingSel.map(c => ({
+        city_id: c.city_id,
+        price_modifier: Number(c.price_modifier) || 0,
+      })),
       notes: notes.trim() || null,
     })
   }
@@ -366,35 +412,107 @@ export function PriceRequestForm({
         )}
       </section>
 
+      {/* Custom field option pricing */}
       {customFields.length > 0 && customFields.map(cf => (
-        <section key={cf.category_field_id} className="space-y-3">
+        <section key={cf.product_field_id} className="space-y-3">
           <div className="flex items-center gap-1.5">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{cf.label}</p>
-            <InfoTooltip text="Enter how much to add (+) or subtract (-) from the base price per unit for each option." />
+            <InfoTooltip text="Set a price modifier for each option and mark one as the default. The default is used when no option is selected." />
           </div>
           {cf.options.length > 0 ? (
             <div className="rounded-md border divide-y">
-              {cf.options.map(opt => (
-                <div key={opt.id} className="flex items-center gap-3 px-3 py-2">
-                  <span className="text-sm font-medium w-28 shrink-0 truncate">{opt.name}</span>
-                  <div className="relative flex-1">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">+/- ₹</span>
-                    <Input
-                      type="number"
-                      className="pl-12"
-                      value={customFieldModifiers[opt.id] ?? ''}
-                      disabled={disabled}
-                      onChange={e => setCustomFieldModifiers(p => ({ ...p, [opt.id]: e.target.value }))}
-                    />
+              {cf.options.map(opt => {
+                const isDefault = (customFieldDefaults[cf.product_field_id] ?? cf.options[0]?.id) === opt.id
+                return (
+                  <div key={opt.id} className="flex items-center gap-3 px-3 py-2">
+                    {!readOnly && (
+                      <input
+                        type="radio"
+                        name={`default_${cf.product_field_id}`}
+                        checked={isDefault}
+                        onChange={() => setCustomFieldDefaults(p => ({ ...p, [cf.product_field_id]: opt.id }))}
+                        title="Set as default"
+                        className="shrink-0"
+                      />
+                    )}
+                    <span className="text-sm font-medium w-28 shrink-0 truncate">{opt.name}</span>
+                    <div className="relative flex-1">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">+/- ₹</span>
+                      <Input
+                        type="number"
+                        className="pl-12"
+                        value={customFieldModifiers[opt.id] ?? ''}
+                        disabled={disabled}
+                        onChange={e => setCustomFieldModifiers(p => ({ ...p, [opt.id]: e.target.value }))}
+                      />
+                    </div>
+                    {isDefault && (
+                      <span className="text-xs text-muted-foreground shrink-0">(default)</span>
+                    )}
                   </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">No options configured.</p>
           )}
         </section>
       ))}
+
+      {/* City pricing */}
+      <section className="space-y-3">
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">City pricing</p>
+          <InfoTooltip text="Propose city-specific price modifiers for this product. Add a city and set how much to add (+) or subtract (-) from the base price per unit for orders from that city." />
+        </div>
+        {!readOnly && cities.length > 0 && (
+          <Combobox
+            options={availableCities.map(c => ({ value: c.id, label: `${c.name}, ${c.state}` }))}
+            value={pendingCity}
+            onValueChange={v => {
+              const city = cities.find(c => c.id === v)
+              if (!city || cityPricingSel.some(x => x.city_id === city.id)) return
+              setCityPricingSel(p => [...p, { city_id: city.id, city_name: city.name, price_modifier: '' }])
+              setPendingCity('')
+            }}
+            placeholder="Add city pricing…"
+            searchPlaceholder="Search cities…"
+          />
+        )}
+        {cityPricingSel.length > 0 ? (
+          <div className="rounded-md border divide-y">
+            {cityPricingSel.map((entry, i) => (
+              <div key={entry.city_id} className="flex items-center gap-3 px-3 py-2">
+                <span className="text-sm font-medium w-36 shrink-0 truncate">{entry.city_name}</span>
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">+/- ₹</span>
+                  <Input
+                    type="number"
+                    className="pl-12"
+                    value={entry.price_modifier}
+                    disabled={disabled}
+                    onChange={ev => setCityPricingSel(p => p.map((x, j) => j === i ? { ...x, price_modifier: ev.target.value } : x))}
+                  />
+                </div>
+                {!readOnly && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => setCityPricingSel(p => p.filter((_, j) => j !== i))}
+                  >
+                    <XIcon className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">
+            {readOnly ? 'None' : 'No city-specific pricing configured — add a city above.'}
+          </p>
+        )}
+      </section>
 
       <section className="space-y-1.5">
         <div className="flex items-center gap-1.5">

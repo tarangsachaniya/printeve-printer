@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
+import { Combobox } from '@/components/ui/combobox'
 import { SignatureCanvas } from '@/components/signature-canvas'
 import { useBootstrap } from '@/context/bootstrap-context'
 
@@ -79,6 +80,13 @@ export default function SetupPage() {
   const [longitude, setLongitude] = useState('')
   const [area, setArea] = useState('')
   const [locating, setLocating] = useState(false)
+  const [allCities, setAllCities] = useState<{ id: string; name: string; state: string }[]>([])
+
+  useEffect(() => {
+    api.get<{ items: { id: string; name: string; state: string }[] }>('/printer/cities/all')
+      .then(res => setAllCities(res.items ?? []))
+      .catch(() => {})
+  }, [])
 
   // Step 3 — Products
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
@@ -242,7 +250,13 @@ export default function SetupPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>City <span className="text-destructive">*</span></Label>
-                  <Input value={city} onChange={e => setCity(e.target.value)} />
+                  <Combobox
+                    options={allCities.map(c => ({ value: c.name, label: `${c.name}, ${c.state}` }))}
+                    value={city}
+                    onValueChange={v => setCity(v)}
+                    placeholder="Select city…"
+                    searchPlaceholder="Search city…"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Pincode <span className="text-destructive">*</span></Label>

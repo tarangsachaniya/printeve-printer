@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
+import { Combobox } from '@/components/ui/combobox'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog'
@@ -115,6 +116,13 @@ export default function ProfilePage() {
   const [locForm, setLocForm] = useState({ address: '', city: '', pincode: '', latitude: '', longitude: '' })
   const [locSaving, setLocSaving] = useState(false)
   const [locating, setLocating] = useState(false)
+  const [allCities, setAllCities] = useState<{ id: string; name: string; state: string }[]>([])
+
+  useEffect(() => {
+    api.get<{ items: { id: string; name: string; state: string }[] }>('/printer/cities/all')
+      .then(res => setAllCities(res.items ?? []))
+      .catch(() => {})
+  }, [])
 
   // Bank
   const [bankEdit, setBankEdit] = useState(false)
@@ -407,7 +415,13 @@ export default function ProfilePage() {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label>City <span className="text-destructive">*</span></Label>
-                        <Input value={locForm.city} onChange={e => setLocForm(f => ({ ...f, city: e.target.value }))} />
+                        <Combobox
+                          options={allCities.map(c => ({ value: c.name, label: `${c.name}, ${c.state}` }))}
+                          value={locForm.city}
+                          onValueChange={v => setLocForm(f => ({ ...f, city: v }))}
+                          placeholder="Select city…"
+                          searchPlaceholder="Search city…"
+                        />
                       </div>
                       <div className="space-y-1.5">
                         <Label>Pincode <span className="text-destructive">*</span></Label>

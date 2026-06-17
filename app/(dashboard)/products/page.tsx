@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { PlusIcon, TagIcon, MapPinIcon } from 'lucide-react'
+import { PlusIcon, TagIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,13 +15,13 @@ import {
   ProductRequestForm,
   type ProductRequestPayload,
   type ProductRequestInitial,
-  type CategoryOption,
 } from '@/components/product-request-form'
 import {
   PriceRequestForm,
   type PriceRequestPayload,
   type PriceRequestInitial,
   type CustomFieldDef,
+  type CityPricingEntry,
 } from '@/components/price-request-form'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
@@ -35,12 +35,12 @@ interface Product {
 interface PaperSizeMeta { id: string; name: string }
 interface PaperQualityMeta { id: string; gsm: number; label: string | null }
 interface PaperTypeMeta { id: string; name: string }
+interface CityMeta { id: string; name: string; state: string }
 
 interface ProductsListMeta {
   sizes: PaperSizeMeta[]
   qualities: PaperQualityMeta[]
   types: PaperTypeMeta[]
-  categories: CategoryOption[]
   product_requests: ProductRequestListItem[]
   price_requests: PriceRequestMetaItem[]
 }
@@ -48,8 +48,6 @@ interface ProductsListMeta {
 interface CityPricingItem {
   id: string
   city_id: string | null
-  city_name: string | null
-  city_state: string | null
   price_modifier: number | null
 }
 
@@ -67,7 +65,7 @@ interface ProductDetail {
     max_completion_minutes: number | null
   }[]
   custom_fields?: {
-    category_field_id: string
+    product_field_id: string
     label: string
     options: { id: string; name: string; price_modifier: number }[]
   }[]
@@ -120,10 +118,11 @@ interface PriceRequestDetail extends PriceRequestInitial {
     paper_qualities?: { paper_quality_id: string; price_modifier: number }[]
     paper_types?: { paper_type_id: string; price_modifier: number }[]
     quantity_slabs?: { min_qty: number; max_qty: number | null; price_modifier: number; max_completion_minutes: number | null }[]
-    custom_field_options?: { category_field_id: string; field_option_value_id: string; price_modifier: number }[]
+    custom_field_options?: { product_field_id: string; field_option_value_id: string; price_modifier: number; is_default?: boolean }[]
+    city_pricing?: CityPricingEntry[]
   }
   current_variant_config?: {
-    custom_fields?: { category_field_id: string; label: string; options: { id: string; name: string; price_modifier: number }[] }[]
+    custom_fields?: { product_field_id: string; label: string; options: { id: string; name: string; price_modifier: number }[] }[]
   }
 }
 
@@ -134,7 +133,7 @@ export default function ProductsPage() {
   const [paperSizes, setPaperSizes] = useState<PaperSizeMeta[]>([])
   const [paperQualities, setPaperQualities] = useState<PaperQualityMeta[]>([])
   const [paperTypes, setPaperTypes] = useState<PaperTypeMeta[]>([])
-  const [categories, setCategories] = useState<CategoryOption[]>([])
+  const [cities, setCities] = useState<CityMeta[]>([])
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
   const [deselectId, setDeselectId] = useState<string | null>(null)
@@ -147,12 +146,6 @@ export default function ProductsPage() {
   const [loadingDetail, setLoadingDetail] = useState(false)
   const [saving, setSaving] = useState(false)
   const detailCache = useRef(new Map<string, ProductRequestDetail>())
-
-  // --- city pricing sheet ---
-  const [citySheetOpen, setCitySheetOpen] = useState(false)
-  const [citySheetProduct, setCitySheetProduct] = useState<Product | null>(null)
-  const [cityPricingItems, setCityPricingItems] = useState<CityPricingItem[]>([])
-  const [loadingCityPricing, setLoadingCityPricing] = useState(false)
 
   // --- price request sheet ---
   const [priceSheetOpen, setPriceSheetOpen] = useState(false)
@@ -175,7 +168,6 @@ export default function ProductsPage() {
         setPaperSizes(prods.meta?.sizes ?? [])
         setPaperQualities(prods.meta?.qualities ?? [])
         setPaperTypes(prods.meta?.types ?? [])
-        setCategories(prods.meta?.categories ?? [])
         setRequests(prods.meta?.product_requests ?? [])
 
         const productById = new Map(items.map(p => [p.id, p]))
@@ -191,23 +183,12 @@ export default function ProductsPage() {
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
-
-  // ---- city pricing handlers ----
-  async function openCityPricing(product: Product) {
-    setCitySheetProduct(product)
-    setCityPricingItems([])
-    setCitySheetOpen(true)
-    setLoadingCityPricing(true)
-    try {
-      const res = await api.get<{ items: CityPricingItem[] }>(`/printer/products/${product.id}/city-pricing`)
-      setCityPricingItems(res.items ?? [])
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to load city pricing')
-    } finally {
-      setLoadingCityPricing(false)
-    }
-  }
+  useEffect(() => {
+    load()
+    api.get<{ items: CityMeta[] }>('/printer/cities')
+      .then(res => setCities(res.items ?? []))
+      .catch(() => {})
+  }, [])
 
   // ---- product request handlers ----
   function closeSheet() {
@@ -230,9 +211,20 @@ export default function ProductsPage() {
     setRequestDetail(null)
     setLoadingDetail(true)
     try {
-      const res = await api.get<{ data: ProductRequestDetail }>(`/printer/product-requests/${id}`)
-      setRequestDetail(res.data)
-      detailCache.current.set(id, res.data)
+      const res = await api.get<{ data: Record<string, unknown> }>(`/printer/product-requests/${id}`)
+      const raw = res.data
+      // Flatten variant_config into the top-level shape that ProductRequestInitial expects
+      const vc = (raw.variant_config as Record<string, unknown> | null) ?? {}
+      const detail: ProductRequestDetail = {
+        ...(raw as Partial<ProductRequestDetail>),
+        paper_sizes: (vc.paper_sizes as ProductRequestDetail['paper_sizes']) ?? [],
+        paper_types: (vc.paper_types as ProductRequestDetail['paper_types']) ?? [],
+        quantity_slabs: (vc.quantity_slabs as ProductRequestDetail['quantity_slabs']) ?? [],
+        product_fields: (vc.product_fields as ProductRequestDetail['product_fields']) ?? [],
+        custom_field_options: (vc.custom_field_options as ProductRequestDetail['custom_field_options']) ?? [],
+      }
+      setRequestDetail(detail)
+      detailCache.current.set(id, detail)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load request')
       closeSheet()
@@ -298,26 +290,34 @@ export default function ProductsPage() {
     setPriceSheetOpen(true)
     setLoadingPriceDetail(true)
     try {
-      const res = await api.get<{ data: ProductDetail }>(`/printer/products/${product.id}`)
-      const customFields = (res.data.custom_fields ?? []).map(cf => ({
-        category_field_id: cf.category_field_id,
+      const [productRes, cityRes] = await Promise.all([
+        api.get<{ data: ProductDetail }>(`/printer/products/${product.id}`),
+        api.get<{ items: CityPricingItem[] }>(`/printer/products/${product.id}/city-pricing`).catch(() => ({ items: [] as CityPricingItem[] })),
+      ])
+      const customFields = (productRes.data.custom_fields ?? []).map(cf => ({
+        product_field_id: cf.product_field_id,
         label: cf.label,
         options: cf.options.map(o => ({ id: o.id, name: o.name })),
       }))
       setPriceCustomFields(customFields)
+      // Only include city pricing for cities the printer has set (matched from their location)
+      const printerCityIds = new Set(cities.map(c => c.id))
       setPriceInitial({
-        base_price: res.data.base_price,
-        paper_sizes: res.data.paper_sizes,
-        paper_qualities: res.data.paper_qualities,
-        paper_types: res.data.paper_types,
-        quantity_slabs: res.data.quantity_slabs,
-        custom_field_options: (res.data.custom_fields ?? []).flatMap(cf =>
+        base_price: productRes.data.base_price,
+        paper_sizes: productRes.data.paper_sizes,
+        paper_qualities: productRes.data.paper_qualities,
+        paper_types: productRes.data.paper_types,
+        quantity_slabs: productRes.data.quantity_slabs,
+        custom_field_options: (productRes.data.custom_fields ?? []).flatMap(cf =>
           cf.options.map(o => ({
-            category_field_id: cf.category_field_id,
+            product_field_id: cf.product_field_id,
             field_option_value_id: o.id,
             price_modifier: o.price_modifier,
           }))
         ),
+        city_pricing: (cityRes.items ?? [])
+          .filter(c => c.city_id && printerCityIds.has(c.city_id))
+          .map(c => ({ city_id: c.city_id!, price_modifier: c.price_modifier ?? 0 })),
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load product pricing')
@@ -337,7 +337,7 @@ export default function ProductsPage() {
     if (cached) {
       setPriceRequestDetail(cached)
       const cachedCustomFields = (cached.current_variant_config?.custom_fields ?? []).map(cf => ({
-        category_field_id: cf.category_field_id,
+        product_field_id: cf.product_field_id,
         label: cf.label,
         options: cf.options.map(o => ({ id: o.id, name: o.name })),
       }))
@@ -349,6 +349,7 @@ export default function ProductsPage() {
         paper_types: cached.paper_types,
         quantity_slabs: cached.quantity_slabs,
         custom_field_options: cached.variant_config?.custom_field_options ?? [],
+        city_pricing: cached.variant_config?.city_pricing ?? [],
         notes: cached.notes,
       })
       if (cached.product_id) setPriceProductId(cached.product_id)
@@ -360,7 +361,7 @@ export default function ProductsPage() {
       priceDetailCache.current.set(item.id, res.data)
       setPriceRequestDetail(res.data)
       const currentCustomFields = (res.data.current_variant_config?.custom_fields ?? []).map(cf => ({
-        category_field_id: cf.category_field_id,
+        product_field_id: cf.product_field_id,
         label: cf.label,
         options: cf.options.map(o => ({ id: o.id, name: o.name })),
       }))
@@ -372,6 +373,7 @@ export default function ProductsPage() {
         paper_types: res.data.paper_types,
         quantity_slabs: res.data.quantity_slabs,
         custom_field_options: res.data.variant_config?.custom_field_options ?? [],
+        city_pricing: res.data.variant_config?.city_pricing ?? [],
         notes: res.data.notes,
       })
       if (res.data.product_id) setPriceProductId(res.data.product_id)
@@ -530,16 +532,6 @@ export default function ProductsPage() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => openCityPricing(product)}
-                    >
-                      <MapPinIcon className="h-3.5 w-3.5 mr-1" />
-                      City pricing
-                    </Button>
-                  )}
-                  {product.selected && (
-                    <Button
-                      size="sm"
-                      variant="outline"
                       onClick={() => openPriceRequestForProduct(product)}
                     >
                       <TagIcon className="h-3.5 w-3.5 mr-1" />
@@ -594,7 +586,6 @@ export default function ProductsPage() {
                 submitLabel={isNew ? 'Submit for review' : 'Save changes'}
                 paperSizes={paperSizes}
                 paperTypes={paperTypes}
-                categories={categories}
               />
             )}
           </div>
@@ -665,6 +656,7 @@ export default function ProductsPage() {
                 paperQualities={paperQualities}
                 paperTypes={paperTypes}
                 customFields={priceCustomFields}
+                cities={cities}
               />
             )}
           </div>
@@ -679,59 +671,6 @@ export default function ProductsPage() {
               </Button>
             </SheetFooter>
           )}
-        </SheetContent>
-      </Sheet>
-
-      {/* City pricing sheet */}
-      <Sheet open={citySheetOpen} onOpenChange={open => { if (!open) setCitySheetOpen(false) }}>
-        <SheetContent side="right" className="!w-[480px] !max-w-none flex flex-col h-full p-0">
-          <SheetHeader className="px-6 pt-5 pb-4 border-b shrink-0">
-            <SheetTitle className="flex items-center gap-2">
-              <MapPinIcon className="h-4 w-4 text-muted-foreground" />
-              City pricing — {citySheetProduct?.name}
-            </SheetTitle>
-            <p className="text-sm text-muted-foreground">
-              City-specific price overrides configured by admin.
-            </p>
-          </SheetHeader>
-
-          <div className="flex-1 overflow-y-auto px-6 py-5">
-            {loadingCityPricing ? (
-              <div className="space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-14 rounded-lg" />
-                ))}
-              </div>
-            ) : cityPricingItems.length === 0 ? (
-              <p className="text-sm text-muted-foreground py-4 text-center">
-                No city-specific pricing configured for this product.
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {cityPricingItems.map(item => (
-                  <div key={item.id} className="rounded-lg border px-4 py-3 space-y-1">
-                    <div className="flex items-center justify-between">
-                      <p className="text-sm font-medium">{item.city_name}</p>
-                      <Badge variant="outline" className="text-xs">{item.city_state}</Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      City price modifier:{' '}
-                      {item.price_modifier != null
-                        ? <span className="font-medium text-foreground">{Number(item.price_modifier) >= 0 ? '+' : ''}₹{Number(item.price_modifier).toLocaleString('en-IN')}</span>
-                        : <span className="italic">₹0 (No modifier)</span>
-                      }
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <SheetFooter className="px-6 py-4 border-t shrink-0">
-            <Button variant="outline" className="w-full" onClick={() => setCitySheetOpen(false)}>
-              Close
-            </Button>
-          </SheetFooter>
         </SheetContent>
       </Sheet>
 
