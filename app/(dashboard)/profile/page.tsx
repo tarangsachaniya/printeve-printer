@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { toast } from 'sonner'
@@ -11,7 +11,36 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
+import { Combobox } from '@/components/ui/combobox'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog'
+import { SignatureCanvas } from '@/components/signature-canvas'
+import { useBootstrap } from '@/context/bootstrap-context'
+
+const CLOUD_NAME    = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME    ?? ''
+const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? ''
+
+async function uploadSignatureToCloudinary(canvas: HTMLCanvasElement, name: string): Promise<string> {
+  const safeName = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'signature'
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error('Canvas export failed')), 'image/png')
+  )
+  const fd = new FormData()
+  fd.append('file', blob, `${safeName}.png`)
+  fd.append('upload_preset', UPLOAD_PRESET)
+  fd.append('folder', 'signatures')
+  fd.append('public_id', safeName)
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+    method: 'POST',
+    body: fd,
+  })
+  const data = await res.json() as { secure_url?: string; error?: { message: string } }
+  if (!res.ok) throw new Error(data.error?.message ?? 'Signature upload failed')
+  return data.secure_url!
+}
 
 // ─── TipTap toolbar ───────────────────────────────────────────────────────────
 
@@ -38,37 +67,6 @@ function ToolbarButton({
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface PrinterLocation {
-  address: string
-  city: string
-  pincode: string
-  latitude?: number
-  longitude?: number
-}
-
-interface BankDetails {
-  account_holder: string
-  bank_name: string
-  account_number: string
-  ifsc_code: string
-  upi_id?: string
-}
-
-interface PrinterProfile {
-  id: string
-  business_name: string
-  status: string
-  rating: number
-  created_at: string
-  description?: string | null
-  area?: string | null
-  printer_locations: PrinterLocation[]
-  printer_bank_details: BankDetails | null
-  user: { email: string; phone: string; full_name: string } | null
-}
-
-interface ProfileResponse { data: PrinterProfile }
 
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   active: 'default', pending: 'outline', suspended: 'destructive',
@@ -106,8 +104,7 @@ function SectionActions({
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
-  const [profile, setProfile] = useState<PrinterProfile | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { profile, agreement, loading, setProfile } = useBootstrap()
 
   // Basic info
   const [basicEdit, setBasicEdit] = useState(false)
@@ -119,6 +116,13 @@ export default function ProfilePage() {
   const [locForm, setLocForm] = useState({ address: '', city: '', pincode: '', latitude: '', longitude: '' })
   const [locSaving, setLocSaving] = useState(false)
   const [locating, setLocating] = useState(false)
+  const [allCities, setAllCities] = useState<{ id: string; name: string; state: string }[]>([])
+
+  useEffect(() => {
+    api.get<{ items: { id: string; name: string; state: string }[] }>('/printer/cities/all')
+      .then(res => setAllCities(res.items ?? []))
+      .catch(() => {})
+  }, [])
 
   // Bank
   const [bankEdit, setBankEdit] = useState(false)
@@ -136,6 +140,15 @@ export default function ProfilePage() {
   const [pwError, setPwError] = useState('')
   const [pwSaving, setPwSaving] = useState(false)
 
+  // Agreement / Signature
+  const [sigEdit, setSigEdit] = useState(false)
+  const [sigAgreed, setSigAgreed] = useState(false)
+  const [sigSigned, setSigSigned] = useState(false)
+  const [sigSaving, setSigSaving] = useState(false)
+  const legalHtml = agreement?.legal_terms ?? ''
+  const legalLoading = loading
+  const sigCanvasRef = useRef<HTMLCanvasElement>(null)
+
   const descEditor = useEditor({
     extensions: [StarterKit],
     content: '',
@@ -144,33 +157,28 @@ export default function ProfilePage() {
   })
 
   useEffect(() => {
-    api.get<ProfileResponse>('/printer/profile')
-      .then(res => {
-        const d = res.data
-        setProfile(d)
-        setBasicForm({ business_name: d.business_name ?? '', phone: d.user?.phone ?? '' })
-        setAreaInput(d.area ?? '')
-        const loc = d.printer_locations?.[0]
-        if (loc) setLocForm({
-          address: loc.address ?? '',
-          city: loc.city ?? '',
-          pincode: loc.pincode ?? '',
-          latitude: loc.latitude?.toString() ?? '',
-          longitude: loc.longitude?.toString() ?? '',
-        })
-        const bank = d.printer_bank_details
-        if (bank) setBankForm({
-          account_holder: bank.account_holder ?? '',
-          bank_name: bank.bank_name ?? '',
-          account_number: bank.account_number ?? '',
-          ifsc_code: bank.ifsc_code ?? '',
-          upi_id: bank.upi_id ?? '',
-        })
-        descEditor?.commands.setContent(d.description ?? '')
-      })
-      .catch(err => toast.error(err.message ?? 'Failed to load profile'))
-      .finally(() => setLoading(false))
-  }, [descEditor])
+    if (!profile) return
+    const d = profile
+    setBasicForm({ business_name: d.business_name ?? '', phone: d.user?.phone ?? '' })
+    setAreaInput(d.area ?? '')
+    const loc = d.printer_locations?.[0]
+    if (loc) setLocForm({
+      address: loc.address ?? '',
+      city: loc.city ?? '',
+      pincode: loc.pincode ?? '',
+      latitude: loc.latitude?.toString() ?? '',
+      longitude: loc.longitude?.toString() ?? '',
+    })
+    const bank = d.printer_bank_details
+    if (bank) setBankForm({
+      account_holder: bank.account_holder ?? '',
+      bank_name: bank.bank_name ?? '',
+      account_number: bank.account_number ?? '',
+      ifsc_code: bank.ifsc_code ?? '',
+      upi_id: bank.upi_id ?? '',
+    })
+    descEditor?.commands.setContent(d.description ?? '')
+  }, [profile, descEditor])
 
   async function saveBasicInfo() {
     setBasicSaving(true)
@@ -232,6 +240,22 @@ export default function ProfilePage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update about')
     } finally { setAboutSaving(false) }
+  }
+
+  async function saveAgreement() {
+    if (!sigCanvasRef.current) return
+    setSigSaving(true)
+    try {
+      const signature_url = await uploadSignatureToCloudinary(sigCanvasRef.current, profile?.business_name ?? '')
+      await api.patch('/printer/profile/agreement', { signature_url })
+      setProfile(p => p ? { ...p, signature_data: signature_url, agreed_at: new Date().toISOString() } : p)
+      setSigEdit(false)
+      setSigAgreed(false)
+      setSigSigned(false)
+      toast.success('Agreement signed')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to sign agreement')
+    } finally { setSigSaving(false) }
   }
 
   async function changePassword() {
@@ -391,7 +415,13 @@ export default function ProfilePage() {
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
                         <Label>City <span className="text-destructive">*</span></Label>
-                        <Input value={locForm.city} onChange={e => setLocForm(f => ({ ...f, city: e.target.value }))} />
+                        <Combobox
+                          options={allCities.map(c => ({ value: c.name, label: `${c.name}, ${c.state}` }))}
+                          value={locForm.city}
+                          onValueChange={v => setLocForm(f => ({ ...f, city: v }))}
+                          placeholder="Select city…"
+                          searchPlaceholder="Search city…"
+                        />
                       </div>
                       <div className="space-y-1.5">
                         <Label>Pincode <span className="text-destructive">*</span></Label>
@@ -473,6 +503,81 @@ export default function ProfilePage() {
               </CardContent>
             </Card>
 
+            {/* Signature */}
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
+                <CardTitle className="text-base">Agreement Signature</CardTitle>
+                <Button size="sm" variant="outline" onClick={() => { setSigEdit(true); setSigAgreed(false); setSigSigned(false) }}>
+                  {profile.signature_data ? 'Re-sign' : 'Sign Agreement'}
+                </Button>
+              </CardHeader>
+              <CardContent className="text-sm space-y-4">
+                {profile.signature_data ? (
+                  <div className="space-y-2">
+                    <div className="rounded-lg border bg-muted/30 p-3 flex items-center justify-center">
+                      <img src={profile.signature_data} alt="Signature" className="max-h-32 object-contain" />
+                    </div>
+                    {profile.agreed_at && (
+                      <p className="text-muted-foreground text-xs">
+                        Signed on {new Date(profile.agreed_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-muted-foreground">Agreement not signed yet. Click Sign Agreement to proceed.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Dialog open={sigEdit} onOpenChange={open => { if (!sigSaving) setSigEdit(open) }}>
+              <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+                <DialogHeader>
+                  <DialogTitle>{profile.signature_data ? 'Re-sign agreement' : 'Sign agreement'}</DialogTitle>
+                </DialogHeader>
+
+                <div className="flex-1 overflow-y-auto space-y-4 -mx-1 px-1">
+                  {legalLoading ? (
+                    <div className="h-48 rounded-lg border bg-muted animate-pulse" />
+                  ) : legalHtml ? (
+                    <div
+                      className="max-h-72 overflow-y-auto rounded-lg border bg-white px-5 py-4 text-sm prose prose-sm max-w-none"
+                      dangerouslySetInnerHTML={{ __html: legalHtml }}
+                    />
+                  ) : (
+                    <div className="rounded-lg border bg-muted/40 px-5 py-4 text-sm text-muted-foreground">
+                      No legal terms have been configured yet. Please contact the administrator.
+                    </div>
+                  )}
+
+                  <label className="flex items-start gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={sigAgreed}
+                      onChange={e => setSigAgreed(e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-input accent-primary cursor-pointer shrink-0"
+                    />
+                    <span className="text-sm font-medium leading-snug">
+                      I have read and agree to the above terms and conditions
+                    </span>
+                  </label>
+
+                  {sigAgreed && (
+                    <div className="space-y-3 pt-1">
+                      <div className="h-px bg-border" />
+                      <SignatureCanvas canvasRef={sigCanvasRef} onSigned={setSigSigned} />
+                    </div>
+                  )}
+                </div>
+
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setSigEdit(false)} disabled={sigSaving}>Cancel</Button>
+                  <Button onClick={saveAgreement} disabled={sigSaving || !sigAgreed || !sigSigned}>
+                    {sigSaving ? 'Saving…' : 'Submit Signature'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             {/* Change Password */}
             <Card>
               <CardHeader className="flex flex-row items-center justify-between pb-3">
@@ -490,15 +595,15 @@ export default function ProfilePage() {
                 <CardContent className="text-sm space-y-3">
                   <div className="space-y-1.5">
                     <Label htmlFor="old-pw">Current Password</Label>
-                    <Input id="old-pw" type="password" value={pwForm.old_password} onChange={e => setPwForm(f => ({ ...f, old_password: e.target.value }))} placeholder="••••••••" />
+                    <PasswordInput id="old-pw" value={pwForm.old_password} onChange={e => setPwForm(f => ({ ...f, old_password: e.target.value }))} placeholder="••••••••" />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="new-pw">New Password</Label>
-                    <Input id="new-pw" type="password" value={pwForm.new_password} onChange={e => setPwForm(f => ({ ...f, new_password: e.target.value }))} placeholder="Min. 8 chars, uppercase, number, symbol" />
+                    <PasswordInput id="new-pw" value={pwForm.new_password} onChange={e => setPwForm(f => ({ ...f, new_password: e.target.value }))} placeholder="Min. 8 chars, uppercase, number, symbol" />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="confirm-pw">Confirm New Password</Label>
-                    <Input id="confirm-pw" type="password" value={pwForm.confirm} onChange={e => setPwForm(f => ({ ...f, confirm: e.target.value }))} placeholder="Repeat new password" />
+                    <PasswordInput id="confirm-pw" value={pwForm.confirm} onChange={e => setPwForm(f => ({ ...f, confirm: e.target.value }))} placeholder="Repeat new password" />
                   </div>
                   {pwError && <p className="text-sm text-destructive">{pwError}</p>}
                 </CardContent>

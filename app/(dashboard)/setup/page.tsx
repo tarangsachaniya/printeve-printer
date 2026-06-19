@@ -6,6 +6,7 @@ import { api } from '@/lib/api'
 import { validatePassword } from '@/lib/password'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
 import dynamic from 'next/dynamic'
 import '@excalidraw/excalidraw/index.css'
@@ -18,10 +19,26 @@ const Excalidraw = dynamic(
   { ssr: false }
 )
 
-interface Product {
-  id: string
-  name: string
-  base_price: number
+const CLOUD_NAME   = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME   ?? ''
+const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? ''
+
+async function uploadSignatureToCloudinary(canvas: HTMLCanvasElement, name: string): Promise<string> {
+  const safeName = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'signature'
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error('Canvas export failed')), 'image/png')
+  )
+  const fd = new FormData()
+  fd.append('file', blob, `${safeName}.png`)
+  fd.append('upload_preset', UPLOAD_PRESET)
+  fd.append('folder', 'signatures')
+  fd.append('public_id', safeName)
+  const res = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, {
+    method: 'POST',
+    body: fd,
+  })
+  const data = await res.json() as { secure_url?: string; error?: { message: string } }
+  if (!res.ok) throw new Error(data.error?.message ?? 'Signature upload failed')
+  return data.secure_url!
 }
 
 const TOTAL_STEPS = 5
@@ -51,8 +68,8 @@ export default function SetupPage() {
   const [error, setError] = useState('')
 
   // Step 0 — Password
-  const [legalHtml, setLegalHtml] = useState('')
-  const [legalLoading, setLegalLoading] = useState(true)
+  const { agreement, products, loading: legalLoading } = useBootstrap()
+  const legalHtml = agreement?.legal_terms ?? ''
   const [agreed, setAgreed] = useState(false)
   const [signed, setSigned] = useState(false)
   const [excalidrawAPI, setExcalidrawAPI] = useState<any>(null)
@@ -69,9 +86,15 @@ export default function SetupPage() {
   const [longitude, setLongitude] = useState('')
   const [area, setArea] = useState('')
   const [locating, setLocating] = useState(false)
+  const [allCities, setAllCities] = useState<{ id: string; name: string; state: string }[]>([])
+
+  useEffect(() => {
+    api.get<{ items: { id: string; name: string; state: string }[] }>('/printer/cities/all')
+      .then(res => setAllCities(res.items ?? []))
+      .catch(() => {})
+  }, [])
 
   // Step 3 — Products
-  const [products, setProducts] = useState<Product[]>([])
   const [selectedProducts, setSelectedProducts] = useState<string[]>([])
 
   // Step 4 — Bank
@@ -82,15 +105,8 @@ export default function SetupPage() {
   const [upiId, setUpiId] = useState('')
 
   useEffect(() => {
-    api.get<{ value: string }>('/printer/legal')
-      .then(d => setLegalHtml(d.value ?? ''))
-      .catch(() => setLegalHtml(''))
-      .finally(() => setLegalLoading(false))
-
-    api.get<{ items: Product[] }>('/printer/products')
-      .then(res => setProducts(res.items ?? []))
-      .catch(() => {})
-  }, [])
+    setSelectedProducts(products.filter(p => p.selected).map(p => p.id))
+  }, [products])
 
   function toggleProduct(id: string) {
     setSelectedProducts(prev =>
@@ -117,33 +133,6 @@ export default function SetupPage() {
     )
   }
 
-  async function getSignatureDataUrl(): Promise<string> {
-    if (!excalidrawAPI) return ''
-
-    const api = excalidrawAPI
-
-    const elements = api.getSceneElements()
-    const appState = api.getAppState()
-
-    const { exportToBlob } = await import('@excalidraw/excalidraw')
-
-    const blob = await exportToBlob({
-      elements,
-      appState,
-      mimeType: 'image/png',
-      files: api.getFiles(),
-    })
-
-    return await new Promise((resolve) => {
-      const reader = new FileReader()
-
-      reader.onloadend = () => {
-        resolve(reader.result as string)
-      }
-
-      reader.readAsDataURL(blob)
-    })
-  }
 
   const handleNext = useCallback(async () => {
     setError('')
@@ -245,15 +234,15 @@ export default function SetupPage() {
             <div className="space-y-4">
               <div className="space-y-1.5">
                 <Label>Current Password</Label>
-                <Input type="password" value={oldPassword} onChange={e => setOldPassword(e.target.value)} placeholder="••••••••" />
+                <PasswordInput value={oldPassword} onChange={e => setOldPassword(e.target.value)} placeholder="••••••••" />
               </div>
               <div className="space-y-1.5">
-                <Label>New Password</Label>
-                <Input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 8 chars, uppercase, number, symbol" />
+                <label className="text-sm font-medium">New Password</label>
+                <PasswordInput value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="Min. 8 chars, uppercase, number, symbol" />
               </div>
               <div className="space-y-1.5">
-                <Label>Confirm New Password</Label>
-                <Input type="password" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat new password" />
+                <label className="text-sm font-medium">Confirm New Password</label>
+                <PasswordInput value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} placeholder="Repeat new password" />
               </div>
             </div>
           )}
@@ -268,7 +257,13 @@ export default function SetupPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label>City <span className="text-destructive">*</span></Label>
-                  <Input value={city} onChange={e => setCity(e.target.value)} />
+                  <Combobox
+                    options={allCities.map(c => ({ value: c.name, label: `${c.name}, ${c.state}` }))}
+                    value={city}
+                    onValueChange={v => setCity(v)}
+                    placeholder="Select city…"
+                    searchPlaceholder="Search city…"
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Pincode <span className="text-destructive">*</span></Label>
@@ -437,76 +432,3 @@ export default function SetupPage() {
   )
 }
 
-
-function SignatureExcalidraw({
-  onAPIReady,
-  onSigned,
-}: {
-  onAPIReady: (api: any) => void
-  onSigned: (v: boolean) => void
-}) {
-  const [api, setApi] = useState<any>(null)
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-          Draw your signature below
-        </p>
-
-        <button
-          type="button"
-          onClick={() => {
-            api?.resetScene()
-            setTimeout(() => {
-              api?.updateScene({
-                appState: {
-                  activeTool: { type: 'freedraw' },
-                  currentItemStrokeColor: '#111827',
-                  viewBackgroundColor: '#ffffff',
-                },
-              })
-            }, 0)
-            onSigned(false)
-          }}
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
-        >
-          Clear
-        </button>
-      </div>
-
-      <div className="h-[220px] rounded-lg border overflow-hidden bg-white">
-          <Excalidraw
-            excalidrawAPI={(excalidrawApi) => { setApi(excalidrawApi); onAPIReady(excalidrawApi) }}
-            style={{ height: '100%', width: '100%' }}
-            zenModeEnabled={true}
-            gridModeEnabled={false}
-            viewModeEnabled={false}
-            renderTopRightUI={() => null}
-            renderFooter={() => null}
-            onChange={(elements: any[]) => {
-              const hasDrawing = elements.some(
-                (el) => !el.isDeleted
-              )
-
-              onSigned(hasDrawing)
-            }}
-            initialData={{
-              appState: {
-                activeTool: {
-                  type: 'freedraw',
-                },
-
-                currentItemStrokeColor: '#111827',
-                viewBackgroundColor: '#ffffff',
-              },
-            }}
-          />
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        Use mouse or touch to draw your signature
-      </p>
-    </div>
-  )
-}

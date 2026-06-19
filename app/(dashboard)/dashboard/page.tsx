@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/table'
 import { RefreshButton } from '@/components/refresh-button'
 import { useAutoRefresh } from '@/hooks/use-auto-refresh'
+import { useBootstrap } from '@/context/bootstrap-context'
 
 interface Job {
   id: string
@@ -26,11 +27,6 @@ interface JobsResponse {
   items: Job[]
 }
 
-interface ProfileData {
-  printer_locations: unknown[]
-  printer_bank_details: unknown | null
-}
-
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
   pending:   'outline',
   printing:  'secondary',
@@ -41,27 +37,23 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | 'dest
 export default function DashboardPage() {
   const [jobs, setJobs] = useState<Job[]>([])
   const [loading, setLoading] = useState(true)
-  const [setupIncomplete, setSetupIncomplete] = useState(false)
+  const { profile } = useBootstrap()
 
   function fetchAll(silent = false) {
     if (!silent) setLoading(true)
-    return Promise.all([
-      api.get<JobsResponse>('/printer/jobs')
-        .then((res) => setJobs(res.items ?? []))
-        .catch(() => {}),
-      api.get<{ data: ProfileData }>('/printer/profile')
-        .then((res) => {
-          const hasLocation = (res.data.printer_locations?.length ?? 0) > 0
-          const hasBank = !!res.data.printer_bank_details
-          setSetupIncomplete(!hasLocation || !hasBank)
-        })
-        .catch(() => {}),
-    ]).finally(() => { if (!silent) setLoading(false) })
+    return api.get<JobsResponse>('/printer/jobs')
+      .then((res) => setJobs(res.items ?? []))
+      .catch(() => {})
+      .finally(() => { if (!silent) setLoading(false) })
   }
 
   useEffect(() => { fetchAll() }, [])
 
   const { refresh, lastRefreshed, refreshing } = useAutoRefresh(() => fetchAll(true))
+
+  const hasLocation = (profile?.printer_locations?.length ?? 0) > 0
+  const hasBank = !!profile?.printer_bank_details
+  const setupIncomplete = !!profile && (!hasLocation || !hasBank)
 
   const total     = jobs.length
   const pending   = jobs.filter((j) => j.status === 'pending').length
