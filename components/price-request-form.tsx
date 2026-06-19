@@ -356,6 +356,12 @@ export function PriceRequestForm({
   const [fieldCatalog, setFieldCatalog] = useState<FieldDefCatalog[]>(fieldCatalogProp)
   useEffect(() => { setFieldCatalog(fieldCatalogProp) }, [fieldCatalogProp])
   const [pendingFieldId, setPendingFieldId] = useState('')
+  const [creatingField, setCreatingField] = useState(false)
+  const [newFieldKey, setNewFieldKey] = useState('')
+  const [newFieldLabel, setNewFieldLabel] = useState('')
+  const [newFieldType, setNewFieldType] = useState('select')
+  const [newFieldOptions, setNewFieldOptions] = useState('')
+  const [savingField, setSavingField] = useState(false)
 
   const availableFieldDefs = fieldCatalog.filter(fd =>
     !localCustomFields.some(cf => cf.field_definition_id === fd.id)
