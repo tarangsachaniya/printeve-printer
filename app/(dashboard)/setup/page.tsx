@@ -1,12 +1,22 @@
 'use client'
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import { validatePassword } from '@/lib/password'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import dynamic from 'next/dynamic'
+import '@excalidraw/excalidraw/index.css'
+
+const Excalidraw = dynamic(
+  async () => {
+    const mod = await import('@excalidraw/excalidraw')
+    return mod.Excalidraw
+  },
+  { ssr: false }
+)
 
 interface Product {
   id: string
@@ -45,8 +55,7 @@ export default function SetupPage() {
   const [legalLoading, setLegalLoading] = useState(true)
   const [agreed, setAgreed] = useState(false)
   const [signed, setSigned] = useState(false)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
+  const [excalidrawAPI, setExcalidrawAPI] = useState<any>(null)
   // Step 1 — Password
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -108,8 +117,32 @@ export default function SetupPage() {
     )
   }
 
-  function getSignatureDataUrl(): string {
-    return canvasRef.current?.toDataURL('image/png') ?? ''
+  async function getSignatureDataUrl(): Promise<string> {
+    if (!excalidrawAPI) return ''
+
+    const api = excalidrawAPI
+
+    const elements = api.getSceneElements()
+    const appState = api.getAppState()
+
+    const { exportToBlob } = await import('@excalidraw/excalidraw')
+
+    const blob = await exportToBlob({
+      elements,
+      appState,
+      mimeType: 'image/png',
+      files: api.getFiles(),
+    })
+
+    return await new Promise((resolve) => {
+      const reader = new FileReader()
+
+      reader.onloadend = () => {
+        resolve(reader.result as string)
+      }
+
+      reader.readAsDataURL(blob)
+    })
   }
 
   const handleNext = useCallback(async () => {
@@ -158,7 +191,7 @@ export default function SetupPage() {
         })
       } else if (step === 4) {
         // Agreement — save signature (last step, mandatory)
-        const signature_data = getSignatureDataUrl()
+        const signature_data = await getSignatureDataUrl()
         await api.patch('/printer/profile/agreement', { signature_data })
         router.push('/dashboard')
         return
@@ -362,7 +395,10 @@ export default function SetupPage() {
               {agreed && (
                 <div className="space-y-3 pt-1">
                   <div className="h-px bg-border" />
-                  <SignatureCanvasInline canvasRef={canvasRef} onSigned={setSigned} />
+                  <SignatureExcalidraw
+                    onAPIReady={setExcalidrawAPI}
+                    onSigned={setSigned}
+                  />
                 </div>
               )}
             </div>
@@ -401,81 +437,15 @@ export default function SetupPage() {
   )
 }
 
-// ─── Inline canvas component (needs access to outer canvasRef) ───────────────
 
-function SignatureCanvasInline({
-  canvasRef,
+function SignatureExcalidraw({
+  onAPIReady,
   onSigned,
 }: {
-  canvasRef: React.RefObject<HTMLCanvasElement | null>
+  onAPIReady: (api: any) => void
   onSigned: (v: boolean) => void
 }) {
-  const drawing = useRef(false)
-
-  function getCtx() {
-    const canvas = canvasRef.current
-    if (!canvas) return null
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return null
-    ctx.strokeStyle = '#111827'
-    ctx.lineWidth = 2
-    ctx.lineCap = 'round'
-    ctx.lineJoin = 'round'
-    return { canvas, ctx }
-  }
-
-  function initCanvas() {
-    const r = getCtx()
-    if (!r) return
-    r.ctx.fillStyle = '#ffffff'
-    r.ctx.fillRect(0, 0, r.canvas.width, r.canvas.height)
-  }
-
-  useEffect(() => {
-    initCanvas()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  function checkSigned() {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
-    const d = ctx.getImageData(0, 0, canvas.width, canvas.height).data
-    let hasMark = false
-    for (let i = 0; i < d.length; i += 4) {
-      if (d[i] < 240 || d[i + 1] < 240 || d[i + 2] < 240) { hasMark = true; break }
-    }
-    onSigned(hasMark)
-  }
-
-  function pos(e: React.MouseEvent<HTMLCanvasElement>) {
-    const r = canvasRef.current!.getBoundingClientRect()
-    return { x: e.clientX - r.left, y: e.clientY - r.top }
-  }
-
-  function posTouch(e: React.TouchEvent<HTMLCanvasElement>) {
-    const r = canvasRef.current!.getBoundingClientRect()
-    const t = e.touches[0]
-    return { x: t.clientX - r.left, y: t.clientY - r.top }
-  }
-
-  function start(x: number, y: number) {
-    drawing.current = true
-    const r = getCtx(); if (!r) return
-    r.ctx.beginPath(); r.ctx.moveTo(x, y)
-  }
-
-  function move(x: number, y: number) {
-    if (!drawing.current) return
-    const r = getCtx(); if (!r) return
-    r.ctx.lineTo(x, y); r.ctx.stroke()
-    checkSigned()
-  }
-
-  function stop() { drawing.current = false }
-
-  function clear() { initCanvas(); onSigned(false) }
+  const [api, setApi] = useState<any>(null)
 
   return (
     <div className="space-y-2">
@@ -483,29 +453,60 @@ function SignatureCanvasInline({
         <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
           Draw your signature below
         </p>
+
         <button
           type="button"
-          onClick={clear}
+          onClick={() => {
+            api?.resetScene()
+            setTimeout(() => {
+              api?.updateScene({
+                appState: {
+                  activeTool: { type: 'freedraw' },
+                  currentItemStrokeColor: '#111827',
+                  viewBackgroundColor: '#ffffff',
+                },
+              })
+            }, 0)
+            onSigned(false)
+          }}
           className="text-xs text-muted-foreground hover:text-foreground transition-colors underline underline-offset-2"
         >
           Clear
         </button>
       </div>
-      <canvas
-        ref={canvasRef}
-        width={600}
-        height={180}
-        className="w-full rounded-lg border border-input bg-white touch-none cursor-crosshair"
-        style={{ height: 180 }}
-        onMouseDown={e => { const { x, y } = pos(e); start(x, y) }}
-        onMouseMove={e => { const { x, y } = pos(e); move(x, y) }}
-        onMouseUp={stop}
-        onMouseLeave={stop}
-        onTouchStart={e => { e.preventDefault(); const { x, y } = posTouch(e); start(x, y) }}
-        onTouchMove={e => { e.preventDefault(); const { x, y } = posTouch(e); move(x, y) }}
-        onTouchEnd={stop}
-      />
-      <p className="text-xs text-muted-foreground">Use mouse or touch to draw your signature</p>
+
+      <div className="h-[220px] rounded-lg border overflow-hidden bg-white">
+          <Excalidraw
+            excalidrawAPI={(excalidrawApi) => { setApi(excalidrawApi); onAPIReady(excalidrawApi) }}
+            style={{ height: '100%', width: '100%' }}
+            zenModeEnabled={true}
+            gridModeEnabled={false}
+            viewModeEnabled={false}
+            renderTopRightUI={() => null}
+            renderFooter={() => null}
+            onChange={(elements: any[]) => {
+              const hasDrawing = elements.some(
+                (el) => !el.isDeleted
+              )
+
+              onSigned(hasDrawing)
+            }}
+            initialData={{
+              appState: {
+                activeTool: {
+                  type: 'freedraw',
+                },
+
+                currentItemStrokeColor: '#111827',
+                viewBackgroundColor: '#ffffff',
+              },
+            }}
+          />
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Use mouse or touch to draw your signature
+      </p>
     </div>
   )
 }

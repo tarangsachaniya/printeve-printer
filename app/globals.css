@@ -172,3 +172,39 @@
 .ProseMirror p {
   margin: 0.25rem 0;
 }
+
+
+/* HIDE MAIN TOP TOOLBAR */
+.excalidraw .App-toolbar {
+  display: none !important;
+}
+
+/* HIDE FOOTER */
+.excalidraw .layer-ui__wrapper__footer {
+  display: none !important;
+}
+
+/* HIDE LEFT/RIGHT FLOATING MENUS */
+.excalidraw .layer-ui__wrapper__top-right {
+  display: none !important;
+}
+
+.excalidraw .layer-ui__wrapper__footer-left {
+  display: none !important;
+}
+
+/* HIDE HELP BUTTON */
+.excalidraw .HelpDialog,
+.excalidraw .help-icon {
+  display: none !important;
+}
+
+/* HIDE SHAPE ACTIONS PANEL */
+.excalidraw .mobile-misc-tools-container {
+  display: none !important;
+}
+
+/* HIDE COLOR/STROKE PANEL */
+.excalidraw .Island {
+  display: none !important;
+}
