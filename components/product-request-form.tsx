@@ -59,6 +59,10 @@ export interface ProductRequestPayload {
   video_url: string | null
   product_fields: { field_definition_id: string; sort_order: number; is_required: boolean }[]
   custom_field_options: { field_definition_id: string; field_option_value_id: string; price_modifier: number; is_default: boolean }[]
+  faqs: { question: string; answer: string }[]
+  finish_and_care: string[]
+  guidelines: { icon_url: string; title: string; description: string }[]
+  specifications: { key: string; value: string }[]
 }
 
 export interface ProductRequestInitial {
@@ -72,6 +76,10 @@ export interface ProductRequestInitial {
   video_url?: string | null
   product_fields?: { field_definition_id: string; sort_order?: number; is_required?: boolean }[]
   custom_field_options?: { field_definition_id: string; field_option_value_id: string; price_modifier: number; is_default: boolean }[]
+  faqs?: { question: string; answer: string }[]
+  finish_and_care?: string[]
+  guidelines?: { icon_url: string; title: string; description: string }[]
+  specifications?: { key: string; value: string }[]
 }
 
 interface PaperSize { id: string; name: string }
@@ -168,6 +176,10 @@ export function buildProductRequestPayload(
   videoUrl: string,
   productFields: ProductFieldEntry[],
   customFieldOptionSel: Record<string, CustomFieldOptionEntry[]>,
+  faqs: { question: string; answer: string }[],
+  finishAndCare: string[],
+  guidelinesArr: { icon_url: string; title: string; description: string }[],
+  specifications: { key: string; value: string }[],
 ): ProductRequestPayload {
   return {
     name: name.trim(),
@@ -197,11 +209,53 @@ export function buildProductRequestPayload(
         is_default: e.is_default,
       }))
     }),
+    faqs: faqs.filter(f => f.question.trim()),
+    finish_and_care: finishAndCare.filter(p => p.trim()),
+    guidelines: guidelinesArr.filter(g => g.title.trim()),
+    specifications: specifications.filter(s => s.key.trim()),
   }
 }
 
+function InlineOptionCreator({ fieldDefId, onCreated }: {
+  fieldDefId: string
+  onCreated: (opt: FieldOptionValueCatalog) => void
+}) {
+  const [value, setValue] = useState('')
+  const [creating, setCreating] = useState(false)
+
+  async function handleCreate() {
+    if (!value.trim()) return
+    setCreating(true)
+    try {
+      const res = await api.post<{ data: { id: string; value: string; sort_order: number } }>(
+        `/printer/field-definitions/${fieldDefId}/options`, { value: value.trim() }
+      )
+      onCreated(res.data)
+      setValue('')
+      toast.success(`Option "${value.trim()}" created`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create option')
+    } finally { setCreating(false) }
+  }
+
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      <Input
+        placeholder="New option value"
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleCreate())}
+        className="flex-1 h-7 text-xs"
+      />
+      <Button type="button" size="sm" variant="outline" onClick={handleCreate} disabled={creating || !value.trim()} className="h-7 text-xs">
+        <PlusIcon className="h-3 w-3 mr-1" /> {creating ? '...' : 'Create'}
+      </Button>
+    </div>
+  )
+}
+
 function VariantOptionSection({
-  title, description, readOnly, entries, setEntries, available, pending, setPending, placeholder,
+  title, description, readOnly, entries, setEntries, available, pending, setPending, placeholder, onCreateOption, createPlaceholder,
 }: {
   title: string
   description?: string
@@ -212,7 +266,21 @@ function VariantOptionSection({
   pending: string
   setPending: (v: string) => void
   placeholder: string
+  onCreateOption?: (name: string) => Promise<void>
+  createPlaceholder?: string
 }) {
+  const [newOptVal, setNewOptVal] = useState('')
+  const [creatingOpt, setCreatingOpt] = useState(false)
+
+  async function handleCreate() {
+    if (!newOptVal.trim() || !onCreateOption) return
+    setCreatingOpt(true)
+    try {
+      await onCreateOption(newOptVal.trim())
+      setNewOptVal('')
+    } finally { setCreatingOpt(false) }
+  }
+
   return (
     <section className="space-y-3">
       <div className="flex items-center gap-1.5">
@@ -232,6 +300,20 @@ function VariantOptionSection({
           placeholder={placeholder}
           searchPlaceholder="Search…"
         />
+      )}
+      {!readOnly && onCreateOption && (
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder={createPlaceholder ?? 'New option name'}
+            value={newOptVal}
+            onChange={e => setNewOptVal(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleCreate())}
+            className="flex-1"
+          />
+          <Button type="button" size="sm" variant="outline" onClick={handleCreate} disabled={creatingOpt || !newOptVal.trim()}>
+            <PlusIcon className="h-3.5 w-3.5 mr-1" /> {creatingOpt ? '...' : 'Create'}
+          </Button>
+        </div>
       )}
       {entries.length > 0 && (
         <div className="rounded-md border divide-y">
@@ -266,6 +348,7 @@ export function ProductRequestForm({
   hideSubmit = false,
   paperSizes = [],
   paperTypes: paperTypeOptions = [],
+  fieldCatalog: fieldCatalogProp = [],
 }: {
   initial?: ProductRequestInitial
   readOnly?: boolean
@@ -276,6 +359,7 @@ export function ProductRequestForm({
   hideSubmit?: boolean
   paperSizes?: PaperSize[]
   paperTypes?: PaperTypeOption[]
+  fieldCatalog?: FieldDefCatalog[]
 }) {
   const [name, setName] = useState(initial?.name ?? '')
   const [basePrice, setBasePrice] = useState(initial?.base_price != null ? String(initial.base_price) : '')
@@ -306,8 +390,16 @@ export function ProductRequestForm({
   const imgInputRef = useRef<HTMLInputElement>(null)
   const vidInputRef = useRef<HTMLInputElement>(null)
 
+  // --- content sections ---
+  const [faqs, setFaqs] = useState<{ question: string; answer: string }[]>(initial?.faqs ?? [])
+  const [finishAndCare, setFinishAndCare] = useState<string[]>(initial?.finish_and_care ?? [])
+  const [guidelinesArr, setGuidelinesArr] = useState<{ icon_url: string; title: string; description: string }[]>(initial?.guidelines ?? [])
+  const [specifications, setSpecifications] = useState<{ key: string; value: string }[]>(initial?.specifications ?? [])
+  const [uploadingGuidelineIcon, setUploadingGuidelineIcon] = useState<number | null>(null)
+
   // --- custom fields ---
-  const [fieldCatalog, setFieldCatalog] = useState<FieldDefCatalog[]>([])
+  // Catalog is supplied by the parent (loaded from /printer/products meta) — no separate fetch
+  const [fieldCatalog, setFieldCatalog] = useState<FieldDefCatalog[]>(fieldCatalogProp)
   const [productFields, setProductFields] = useState<ProductFieldEntry[]>([])
   const [customFieldOptionSel, setCustomFieldOptionSel] = useState<Record<string, CustomFieldOptionEntry[]>>({})
   const [pendingField, setPendingField] = useState('')
@@ -320,38 +412,39 @@ export function ProductRequestForm({
   const dragFieldIndexRef = useRef<number | null>(null)
   const [fieldDragOver, setFieldDragOver] = useState<number | null>(null)
 
+  // When the catalog or initial changes, sync field catalog and init product fields
   useEffect(() => {
-    api.get<{ items: FieldDefCatalog[] }>('/printer/field-definitions')
-      .then(res => {
-        const catalog = res.items ?? []
-        setFieldCatalog(catalog)
-        // Initialize product fields from initial after catalog is available
-        const initFields = initial?.product_fields ?? []
-        if (initFields.length > 0) {
-          setProductFields(initFields.map(f => {
-            const def = catalog.find(d => d.id === f.field_definition_id)
-            return {
-              field_definition_id: f.field_definition_id,
-              label: def?.label ?? f.field_definition_id,
-              field_type: def?.field_type ?? 'text',
-              field_option_values: def?.field_option_values ?? [],
-              is_required: f.is_required ?? false,
-            }
-          }))
-          const sel: Record<string, CustomFieldOptionEntry[]> = {}
-          for (const opt of initial?.custom_field_options ?? []) {
-            if (!sel[opt.field_definition_id]) sel[opt.field_definition_id] = []
-            sel[opt.field_definition_id].push({
-              field_option_value_id: opt.field_option_value_id,
-              price_modifier: String(opt.price_modifier ?? 0),
-              is_default: opt.is_default ?? false,
-            })
-          }
-          setCustomFieldOptionSel(sel)
+    setFieldCatalog(fieldCatalogProp)
+  }, [fieldCatalogProp]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const catalog = fieldCatalogProp
+    if (catalog.length === 0) return
+    // Initialize product fields from initial once catalog is available
+    const initFields = initial?.product_fields ?? []
+    if (initFields.length > 0) {
+      setProductFields(initFields.map(f => {
+        const def = catalog.find(d => d.id === f.field_definition_id)
+        return {
+          field_definition_id: f.field_definition_id,
+          label: def?.label ?? f.field_definition_id,
+          field_type: def?.field_type ?? 'text',
+          field_option_values: def?.field_option_values ?? [],
+          is_required: f.is_required ?? false,
         }
-      })
-      .catch(() => {})
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+      }))
+      const sel: Record<string, CustomFieldOptionEntry[]> = {}
+      for (const opt of initial?.custom_field_options ?? []) {
+        if (!sel[opt.field_definition_id]) sel[opt.field_definition_id] = []
+        sel[opt.field_definition_id].push({
+          field_option_value_id: opt.field_option_value_id,
+          price_modifier: String(opt.price_modifier ?? 0),
+          is_default: opt.is_default ?? false,
+        })
+      }
+      setCustomFieldOptionSel(sel)
+    }
+  }, [fieldCatalogProp, initial]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function addFieldFromCatalog(def: FieldDefCatalog) {
     if (productFields.some(f => f.field_definition_id === def.id)) return
@@ -394,15 +487,12 @@ export function ProductRequestForm({
         field_type: newFieldType,
         options,
       })
-      // Refresh catalog
-      const updated = await api.get<{ items: FieldDefCatalog[] }>('/printer/field-definitions')
-      const catalog = updated.items ?? []
-      setFieldCatalog(catalog)
-      // Add the new field and auto-select it
-      const newDef = catalog.find(d => d.id === res.data.id) ?? {
+      // Append to local catalog so it's immediately available — no re-fetch needed
+      const newDef: FieldDefCatalog = {
         ...res.data,
-        field_option_values: res.data.field_option_values ?? [],
+        field_option_values: (res.data as any).field_option_values ?? [],
       }
+      setFieldCatalog(prev => [...prev, newDef])
       addFieldFromCatalog(newDef)
       setCreatingField(false)
       setNewFieldKey('')
@@ -458,9 +548,30 @@ export function ProductRequestForm({
       descEditor.commands.setContent(initial.description)
   }, [initial?.description, descEditor])
 
-  const availableSizes = paperSizes.filter(s => !paperSizesSel.some(x => x.id === s.id))
-  const availableTypes = paperTypeOptions.filter(t => !paperTypesSel.some(x => x.id === t.id))
+  const [localPaperSizes, setLocalPaperSizes] = useState(paperSizes)
+  const [localPaperTypes, setLocalPaperTypes] = useState(paperTypeOptions)
+  useEffect(() => { setLocalPaperSizes(paperSizes) }, [paperSizes])
+  useEffect(() => { setLocalPaperTypes(paperTypeOptions) }, [paperTypeOptions])
+
+  const availableSizes = localPaperSizes.filter(s => !paperSizesSel.some(x => x.id === s.id))
+  const availableTypes = localPaperTypes.filter(t => !paperTypesSel.some(x => x.id === t.id))
   const availableFieldsForPicker = fieldCatalog.filter(d => !productFields.some(f => f.field_definition_id === d.id))
+
+  async function createPaperSize(name: string) {
+    const res = await api.post<{ data: PaperSize }>('/printer/paper/sizes', { name, sort_order: localPaperSizes.length })
+    const created = res.data
+    setLocalPaperSizes(prev => [...prev, created])
+    setPaperSizesSel(prev => [...prev, { id: created.id, name: created.name, price_modifier: '' }])
+    toast.success(`Paper size "${name}" created`)
+  }
+
+  async function createPaperType(name: string) {
+    const res = await api.post<{ data: PaperTypeOption }>('/printer/paper/types', { name, sort_order: localPaperTypes.length })
+    const created = res.data
+    setLocalPaperTypes(prev => [...prev, created])
+    setPaperTypesSel(prev => [...prev, { id: created.id, name: created.name, price_modifier: '' }])
+    toast.success(`Paper type "${name}" created`)
+  }
 
   async function uploadImageFiles(files: File[]) {
     if (!files.length || readOnly) return
@@ -521,6 +632,7 @@ export function ProductRequestForm({
       name, basePrice, getDescriptionHtml(), paperSizesSel,
       paperTypesSel, qtySlabs, images, videoUrl,
       productFields, customFieldOptionSel,
+      faqs, finishAndCare, guidelinesArr, specifications,
     )
     onSubmit(payload)
   }
@@ -687,6 +799,8 @@ export function ProductRequestForm({
         pending={pendingSize}
         setPending={setPendingSize}
         placeholder="Select size…"
+        onCreateOption={readOnly ? undefined : createPaperSize}
+        createPlaceholder="e.g. A4, A5, 3.5x2 in"
       />
 
       <VariantOptionSection
@@ -699,6 +813,8 @@ export function ProductRequestForm({
         pending={pendingType}
         setPending={setPendingType}
         placeholder="Select type…"
+        onCreateOption={readOnly ? undefined : createPaperType}
+        createPlaceholder="e.g. Glossy, Matte, Kraft"
       />
 
       <section className="space-y-3">
@@ -887,9 +1003,11 @@ export function ProductRequestForm({
                 </div>
 
                 {/* Option list for select/radio/boolean/multi_select */}
-                {OPTION_FIELD_TYPES.has(field.field_type) && field.field_option_values.length > 0 && (
+                {OPTION_FIELD_TYPES.has(field.field_type) && (
                   <div className="ml-6 space-y-1">
-                    <p className="text-xs text-muted-foreground mb-1">Options — set price modifier and default:</p>
+                    {(customFieldOptionSel[field.field_definition_id] ?? []).length > 0 && (
+                      <p className="text-xs text-muted-foreground mb-1">Options — set price modifier and default:</p>
+                    )}
                     {(customFieldOptionSel[field.field_definition_id] ?? []).map((entry, oi) => {
                       const ov = field.field_option_values.find(v => v.id === entry.field_option_value_id)
                       return (
@@ -932,6 +1050,28 @@ export function ProductRequestForm({
                         </div>
                       )
                     })}
+                    {!readOnly && (
+                      <InlineOptionCreator
+                        fieldDefId={field.field_definition_id}
+                        onCreated={(opt) => {
+                          setFieldCatalog(prev => prev.map(fd =>
+                            fd.id === field.field_definition_id
+                              ? { ...fd, field_option_values: [...fd.field_option_values, opt] }
+                              : fd
+                          ))
+                          setProductFields(prev => prev.map(pf =>
+                            pf.field_definition_id === field.field_definition_id
+                              ? { ...pf, field_option_values: [...pf.field_option_values, opt] }
+                              : pf
+                          ))
+                          setCustomFieldOptionSel(prev => ({
+                            ...prev,
+                            [field.field_definition_id]: [...(prev[field.field_definition_id] ?? []),
+                              { field_option_value_id: opt.id, price_modifier: '', is_default: (prev[field.field_definition_id] ?? []).length === 0 }],
+                          }))
+                        }}
+                      />
+                    )}
                   </div>
                 )}
 
@@ -946,6 +1086,162 @@ export function ProductRequestForm({
 
         {readOnly && productFields.length === 0 && (
           <p className="text-sm text-muted-foreground">No custom fields</p>
+        )}
+      </section>
+
+      {/* ── FAQs ── */}
+      <section className="space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">FAQs</p>
+            <InfoTooltip text="Question & answer pairs displayed on the product page." />
+          </div>
+          {!readOnly && (
+            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setFaqs(prev => [...prev, { question: '', answer: '' }])}>
+              <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add FAQ
+            </Button>
+          )}
+        </div>
+        {faqs.length > 0 && (
+          <div className="space-y-3">
+            {faqs.map((faq, i) => (
+              <div key={i} className="rounded-md border p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <Input placeholder="Question" value={faq.question} onChange={e => setFaqs(prev => prev.map((f, idx) => idx === i ? { ...f, question: e.target.value } : f))} className="flex-1" disabled={readOnly} />
+                  {!readOnly && (
+                    <Button type="button" variant="ghost" size="icon-sm" onClick={() => setFaqs(prev => prev.filter((_, idx) => idx !== i))}>
+                      <XIcon className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+                <textarea placeholder="Answer" value={faq.answer} onChange={e => setFaqs(prev => prev.map((f, idx) => idx === i ? { ...f, answer: e.target.value } : f))} disabled={readOnly} className="w-full rounded-md border px-3 py-2 text-sm min-h-[60px] resize-y bg-transparent" rows={2} />
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── Finish & Care ── */}
+      <section className="space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Finish & Care</p>
+            <InfoTooltip text="Bullet points with care instructions." />
+          </div>
+          {!readOnly && (
+            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setFinishAndCare(prev => [...prev, ''])}>
+              <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add Point
+            </Button>
+          )}
+        </div>
+        {finishAndCare.length > 0 && (
+          <div className="space-y-2">
+            {finishAndCare.map((point, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Input placeholder="Care instruction point" value={point} onChange={e => setFinishAndCare(prev => prev.map((p, idx) => idx === i ? e.target.value : p))} className="flex-1" disabled={readOnly} />
+                {!readOnly && (
+                  <Button type="button" variant="ghost" size="icon-sm" onClick={() => setFinishAndCare(prev => prev.filter((_, idx) => idx !== i))}>
+                    <XIcon className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── Guidelines ── */}
+      <section className="space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Guidelines</p>
+            <InfoTooltip text="Guidelines with icon, title, and description." />
+          </div>
+          {!readOnly && (
+            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setGuidelinesArr(prev => [...prev, { icon_url: '', title: '', description: '' }])}>
+              <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add Guideline
+            </Button>
+          )}
+        </div>
+        {guidelinesArr.length > 0 && (
+          <div className="space-y-3">
+            {guidelinesArr.map((g, i) => (
+              <div key={i} className="rounded-md border p-3 space-y-2">
+                <div className="flex items-start gap-3">
+                  <div className="shrink-0">
+                    {g.icon_url ? (
+                      <div className="relative group">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={g.icon_url} alt="" className="h-14 w-14 rounded-lg object-cover border" />
+                        {!readOnly && (
+                          <button type="button" className="absolute -top-1.5 -right-1.5 bg-destructive text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition-opacity" onClick={() => setGuidelinesArr(prev => prev.map((gl, idx) => idx === i ? { ...gl, icon_url: '' } : gl))}>
+                            <XIcon className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    ) : !readOnly ? (
+                      <label className="flex items-center justify-center h-14 w-14 rounded-lg border-2 border-dashed cursor-pointer hover:border-primary/50 transition-colors">
+                        {uploadingGuidelineIcon === i ? (
+                          <span className="text-xs text-muted-foreground">...</span>
+                        ) : (
+                          <UploadIcon className="h-5 w-5 text-muted-foreground" />
+                        )}
+                        <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                          const file = e.target.files?.[0]
+                          if (!file) return
+                          setUploadingGuidelineIcon(i)
+                          try {
+                            const url = await uploadToCloudinary(file, 'image')
+                            setGuidelinesArr(prev => prev.map((gl, idx) => idx === i ? { ...gl, icon_url: url } : gl))
+                          } catch { toast.error('Icon upload failed') }
+                          finally { setUploadingGuidelineIcon(null) }
+                        }} />
+                      </label>
+                    ) : null}
+                  </div>
+                  <div className="flex-1 space-y-2">
+                    <Input placeholder="Title" value={g.title} onChange={e => setGuidelinesArr(prev => prev.map((gl, idx) => idx === i ? { ...gl, title: e.target.value } : gl))} disabled={readOnly} />
+                    <textarea placeholder="Description" value={g.description} onChange={e => setGuidelinesArr(prev => prev.map((gl, idx) => idx === i ? { ...gl, description: e.target.value } : gl))} disabled={readOnly} className="w-full rounded-md border px-3 py-2 text-sm min-h-[50px] resize-y bg-transparent" rows={2} />
+                  </div>
+                  {!readOnly && (
+                    <Button type="button" variant="ghost" size="icon-sm" className="shrink-0" onClick={() => setGuidelinesArr(prev => prev.filter((_, idx) => idx !== i))}>
+                      <XIcon className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {/* ── Specifications ── */}
+      <section className="space-y-3">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Specifications</p>
+            <InfoTooltip text="Key-value pairs displayed on the product page." />
+          </div>
+          {!readOnly && (
+            <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => setSpecifications(prev => [...prev, { key: '', value: '' }])}>
+              <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add Spec
+            </Button>
+          )}
+        </div>
+        {specifications.length > 0 && (
+          <div className="space-y-2">
+            {specifications.map((spec, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <Input placeholder="Key (e.g. Material)" value={spec.key} onChange={e => setSpecifications(prev => prev.map((s, idx) => idx === i ? { ...s, key: e.target.value } : s))} className="w-[180px] shrink-0" disabled={readOnly} />
+                <Input placeholder="Value" value={spec.value} onChange={e => setSpecifications(prev => prev.map((s, idx) => idx === i ? { ...s, value: e.target.value } : s))} className="flex-1" disabled={readOnly} />
+                {!readOnly && (
+                  <Button type="button" variant="ghost" size="icon-sm" onClick={() => setSpecifications(prev => prev.filter((_, idx) => idx !== i))}>
+                    <XIcon className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
         )}
       </section>
 

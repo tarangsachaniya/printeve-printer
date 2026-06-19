@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { PlusIcon, TagIcon } from 'lucide-react'
+import { PlusIcon, TagIcon, XIcon } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -22,7 +22,9 @@ import {
   type PriceRequestInitial,
   type CustomFieldDef,
   type CityPricingEntry,
+  type FieldDefCatalog,
 } from '@/components/price-request-form'
+import { Input } from '@/components/ui/input'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 
 interface Product {
@@ -43,6 +45,7 @@ interface ProductsListMeta {
   types: PaperTypeMeta[]
   product_requests: ProductRequestListItem[]
   price_requests: PriceRequestMetaItem[]
+  field_definitions: FieldDefCatalog[]
 }
 
 interface CityPricingItem {
@@ -66,9 +69,14 @@ interface ProductDetail {
   }[]
   custom_fields?: {
     product_field_id: string
+    field_definition_id: string
     label: string
     options: { id: string; name: string; price_modifier: number }[]
   }[]
+  faqs?: { question: string; answer: string }[]
+  finish_and_care?: string[]
+  guidelines?: { icon_url: string; title: string; description: string }[]
+  specifications?: { key: string; value: string }[]
 }
 
 interface ProductRequestListItem {
@@ -122,7 +130,7 @@ interface PriceRequestDetail extends PriceRequestInitial {
     city_pricing?: CityPricingEntry[]
   }
   current_variant_config?: {
-    custom_fields?: { product_field_id: string; label: string; options: { id: string; name: string; price_modifier: number }[] }[]
+    custom_fields?: { product_field_id: string; field_definition_id: string; label: string; options: { id: string; name: string; price_modifier: number }[] }[]
   }
 }
 
@@ -134,6 +142,7 @@ export default function ProductsPage() {
   const [paperQualities, setPaperQualities] = useState<PaperQualityMeta[]>([])
   const [paperTypes, setPaperTypes] = useState<PaperTypeMeta[]>([])
   const [cities, setCities] = useState<CityMeta[]>([])
+  const [fieldCatalog, setFieldCatalog] = useState<FieldDefCatalog[]>([])
   const [loading, setLoading] = useState(true)
   const [toggling, setToggling] = useState<string | null>(null)
   const [deselectId, setDeselectId] = useState<string | null>(null)
@@ -159,6 +168,7 @@ export default function ProductsPage() {
   const [priceCustomFields, setPriceCustomFields] = useState<CustomFieldDef[]>([])
   const priceDetailCache = useRef(new Map<string, PriceRequestDetail>())
 
+
   function load() {
     setLoading(true)
     api.get<{ items: Product[]; meta: ProductsListMeta }>('/printer/products')
@@ -169,6 +179,7 @@ export default function ProductsPage() {
         setPaperQualities(prods.meta?.qualities ?? [])
         setPaperTypes(prods.meta?.types ?? [])
         setRequests(prods.meta?.product_requests ?? [])
+        setFieldCatalog(prods.meta?.field_definitions ?? [])
 
         const productById = new Map(items.map(p => [p.id, p]))
         setPriceRequests(
@@ -298,6 +309,7 @@ export default function ProductsPage() {
       ])
       const customFields = (productRes.data.custom_fields ?? []).map(cf => ({
         product_field_id: cf.product_field_id,
+        field_definition_id: cf.field_definition_id,
         label: cf.label,
         options: cf.options.map(o => ({ id: o.id, name: o.name })),
       }))
@@ -320,6 +332,10 @@ export default function ProductsPage() {
         city_pricing: (cityRes.items ?? [])
           .filter(c => c.city_id && printerCityIds.has(c.city_id))
           .map(c => ({ city_id: c.city_id!, price_modifier: c.price_modifier ?? 0 })),
+        faqs: productRes.data.faqs ?? [],
+        finish_and_care: productRes.data.finish_and_care ?? [],
+        guidelines: productRes.data.guidelines ?? [],
+        specifications: productRes.data.specifications ?? [],
       })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load product pricing')
@@ -340,6 +356,7 @@ export default function ProductsPage() {
       setPriceRequestDetail(cached)
       const cachedCustomFields = (cached.current_variant_config?.custom_fields ?? []).map(cf => ({
         product_field_id: cf.product_field_id,
+        field_definition_id: cf.field_definition_id,
         label: cf.label,
         options: cf.options.map(o => ({ id: o.id, name: o.name })),
       }))
@@ -364,6 +381,7 @@ export default function ProductsPage() {
       setPriceRequestDetail(res.data)
       const currentCustomFields = (res.data.current_variant_config?.custom_fields ?? []).map(cf => ({
         product_field_id: cf.product_field_id,
+        field_definition_id: cf.field_definition_id,
         label: cf.label,
         options: cf.options.map(o => ({ id: o.id, name: o.name })),
       }))
@@ -531,14 +549,16 @@ export default function ProductsPage() {
                 </div>
                 <div className="flex items-center gap-2">
                   {product.selected && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => openPriceRequestForProduct(product)}
-                    >
-                      <TagIcon className="h-3.5 w-3.5 mr-1" />
-                      Request price change
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => openPriceRequestForProduct(product)}
+                      >
+                        <TagIcon className="h-3.5 w-3.5 mr-1" />
+                        Request price change
+                      </Button>
+                    </>
                   )}
                   {product.selected && <Badge variant="default">Selected</Badge>}
                   <Button
@@ -588,6 +608,7 @@ export default function ProductsPage() {
                 submitLabel={isNew ? 'Submit for review' : 'Save changes'}
                 paperSizes={paperSizes}
                 paperTypes={paperTypes}
+                fieldCatalog={fieldCatalog}
               />
             )}
           </div>
@@ -658,6 +679,7 @@ export default function ProductsPage() {
                 paperQualities={paperQualities}
                 paperTypes={paperTypes}
                 customFields={priceCustomFields}
+                fieldCatalog={fieldCatalog}
                 cities={cities}
               />
             )}
