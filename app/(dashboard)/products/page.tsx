@@ -303,6 +303,7 @@ export default function ProductsPage() {
           price: pm.price,
           max_completion_minutes: pm.max_completion_minutes,
           option_value_ids: pm.option_value_ids,
+          city_id: pm.city_id ?? null,
         })),
         current_options: productRes.data.options,
         current_pricing_matrix: productRes.pricing_matrix,
