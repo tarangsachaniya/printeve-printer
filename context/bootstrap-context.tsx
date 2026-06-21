@@ -52,7 +52,6 @@ export interface PrinterAgreement {
 export interface PrinterProduct {
   id: string
   name: string
-  base_price: number
   slug: string | null
   selected: boolean
 }

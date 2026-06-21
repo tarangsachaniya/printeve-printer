@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { PlusIcon, VideoIcon, XIcon, UploadIcon, GripVerticalIcon, ChevronDownIcon } from 'lucide-react'
+import { PlusIcon, VideoIcon, XIcon, UploadIcon, GripVerticalIcon, ChevronDownIcon, ChevronRight, Trash2, WandSparklesIcon } from 'lucide-react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { toast } from 'sonner'
@@ -11,14 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Combobox } from '@/components/ui/combobox'
 import { InfoTooltip } from '@/components/ui/info-tooltip'
-
-export interface VariantOptionEntry { id: string; price_modifier: number }
-export interface QuantitySlabEntry {
-  min_qty: number
-  max_qty: number | null
-  unit_price: number
-  max_completion_minutes: number | null
-}
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 export interface FieldOptionValueCatalog {
   id: string
@@ -34,31 +27,33 @@ export interface FieldDefCatalog {
   field_option_values: FieldOptionValueCatalog[]
 }
 
-interface ProductFieldEntry {
+interface OptionEntry {
   field_definition_id: string
-  label: string
-  field_type: FieldDefCatalog['field_type']
-  field_option_values: FieldOptionValueCatalog[]
+  sort_order: number
   is_required: boolean
+  value_ids: string[]
 }
 
-interface CustomFieldOptionEntry {
-  field_option_value_id: string
-  price_modifier: string
-  is_default: boolean
+interface PricingTier {
+  quantity: string
+  price: string
+  max_completion_minutes: string
+}
+
+interface PricingGroup {
+  option_value_ids: string[]
+  city_id: string | null
+  tiers: PricingTier[]
+  collapsed: boolean
 }
 
 export interface ProductRequestPayload {
   name: string
-  base_price: number
   description: string | null
-  paper_sizes: { paper_size_id: string; price_modifier: number }[]
-  paper_types: { paper_type_id: string; price_modifier: number }[]
-  quantity_slabs: QuantitySlabEntry[]
   images: string[]
   video_url: string | null
-  product_fields: { field_definition_id: string; sort_order: number; is_required: boolean }[]
-  custom_field_options: { field_definition_id: string; field_option_value_id: string; price_modifier: number; is_default: boolean }[]
+  options: { field_definition_id: string; sort_order: number; is_required: boolean; value_ids: string[] }[]
+  pricing_matrix: { quantity: number; price: number; max_completion_minutes: number | null; option_value_ids: string[]; city_id: string | null }[]
   faqs: { question: string; answer: string }[]
   finish_and_care: string[]
   guidelines: { icon_url: string; title: string; description: string }[]
@@ -67,26 +62,18 @@ export interface ProductRequestPayload {
 
 export interface ProductRequestInitial {
   name?: string
-  base_price?: number
   description?: string | null
-  paper_sizes?: { paper_size_id: string; price_modifier: number; name?: string }[]
-  paper_types?: { paper_type_id: string; price_modifier: number; name?: string }[]
-  quantity_slabs?: QuantitySlabEntry[]
   images?: string[]
   video_url?: string | null
-  product_fields?: { field_definition_id: string; sort_order?: number; is_required?: boolean }[]
-  custom_field_options?: { field_definition_id: string; field_option_value_id: string; price_modifier: number; is_default: boolean }[]
+  options?: { field_definition_id: string; sort_order?: number; is_required?: boolean; value_ids?: string[] }[]
+  pricing_matrix?: { quantity: number; price: number; max_completion_minutes: number | null; option_value_ids: string[]; city_id: string | null }[]
   faqs?: { question: string; answer: string }[]
   finish_and_care?: string[]
   guidelines?: { icon_url: string; title: string; description: string }[]
   specifications?: { key: string; value: string }[]
 }
 
-interface PaperSize { id: string; name: string }
-interface PaperTypeOption { id: string; name: string }
-
-type OptionEntry = { id: string; name: string; price_modifier: string }
-type QtySlab = { min_qty: string; max_qty: string; unit_price: string; max_completion_minutes: string }
+const OPTION_FIELD_TYPES = new Set(['select', 'multi_select', 'boolean', 'radio'])
 
 const FIELD_TYPES = [
   { value: 'select',       label: 'Dropdown (select)' },
@@ -98,8 +85,6 @@ const FIELD_TYPES = [
   { value: 'textarea',     label: 'Text area' },
   { value: 'file_upload',  label: 'File upload' },
 ]
-
-const OPTION_FIELD_TYPES = new Set(['select', 'multi_select', 'boolean', 'radio'])
 
 function ToolbarButton({
   onClick, active, disabled, children,
@@ -165,57 +150,6 @@ async function uploadToCloudinary(file: File, type: 'image' | 'video'): Promise<
   return data.secure_url!
 }
 
-export function buildProductRequestPayload(
-  name: string,
-  basePrice: string,
-  descHtml: string,
-  paperSizesSel: OptionEntry[],
-  paperTypesSel: OptionEntry[],
-  qtySlabs: QtySlab[],
-  images: string[],
-  videoUrl: string,
-  productFields: ProductFieldEntry[],
-  customFieldOptionSel: Record<string, CustomFieldOptionEntry[]>,
-  faqs: { question: string; answer: string }[],
-  finishAndCare: string[],
-  guidelinesArr: { icon_url: string; title: string; description: string }[],
-  specifications: { key: string; value: string }[],
-): ProductRequestPayload {
-  return {
-    name: name.trim(),
-    base_price: Number(basePrice),
-    description: descHtml || null,
-    paper_sizes: paperSizesSel.map(s => ({ paper_size_id: s.id, price_modifier: Number(s.price_modifier) || 0 })),
-    paper_types: paperTypesSel.map(t => ({ paper_type_id: t.id, price_modifier: Number(t.price_modifier) || 0 })),
-    quantity_slabs: qtySlabs.map(s => ({
-      min_qty: Number(s.min_qty),
-      max_qty: s.max_qty ? Number(s.max_qty) : null,
-      unit_price: Number(s.unit_price),
-      max_completion_minutes: s.max_completion_minutes ? Number(s.max_completion_minutes) : null,
-    })),
-    images,
-    video_url: videoUrl || null,
-    product_fields: productFields.map((f, i) => ({
-      field_definition_id: f.field_definition_id,
-      sort_order: i,
-      is_required: f.is_required,
-    })),
-    custom_field_options: productFields.flatMap(f => {
-      const opts = customFieldOptionSel[f.field_definition_id] ?? []
-      return opts.map(e => ({
-        field_definition_id: f.field_definition_id,
-        field_option_value_id: e.field_option_value_id,
-        price_modifier: Number(e.price_modifier) || 0,
-        is_default: e.is_default,
-      }))
-    }),
-    faqs: faqs.filter(f => f.question.trim()),
-    finish_and_care: finishAndCare.filter(p => p.trim()),
-    guidelines: guidelinesArr.filter(g => g.title.trim()),
-    specifications: specifications.filter(s => s.key.trim()),
-  }
-}
-
 function InlineOptionCreator({ fieldDefId, onCreated }: {
   fieldDefId: string
   onCreated: (opt: FieldOptionValueCatalog) => void
@@ -254,88 +188,9 @@ function InlineOptionCreator({ fieldDefId, onCreated }: {
   )
 }
 
-function VariantOptionSection({
-  title, description, readOnly, entries, setEntries, available, pending, setPending, placeholder, onCreateOption, createPlaceholder,
-}: {
-  title: string
-  description?: string
-  readOnly: boolean
-  entries: OptionEntry[]
-  setEntries: React.Dispatch<React.SetStateAction<OptionEntry[]>>
-  available: { id: string; name: string }[]
-  pending: string
-  setPending: (v: string) => void
-  placeholder: string
-  onCreateOption?: (name: string) => Promise<void>
-  createPlaceholder?: string
-}) {
-  const [newOptVal, setNewOptVal] = useState('')
-  const [creatingOpt, setCreatingOpt] = useState(false)
-
-  async function handleCreate() {
-    if (!newOptVal.trim() || !onCreateOption) return
-    setCreatingOpt(true)
-    try {
-      await onCreateOption(newOptVal.trim())
-      setNewOptVal('')
-    } finally { setCreatingOpt(false) }
-  }
-
-  return (
-    <section className="space-y-3">
-      <div className="flex items-center gap-1.5">
-        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</p>
-        {description && <InfoTooltip text={description} />}
-      </div>
-      {!readOnly && available.length > 0 && (
-        <Combobox
-          options={available.map(o => ({ value: o.id, label: o.name }))}
-          value={pending}
-          onValueChange={v => {
-            const opt = available.find(o => o.id === v)
-            if (!opt || entries.some(e => e.id === opt.id)) return
-            setEntries(p => [...p, { id: opt.id, name: opt.name, price_modifier: '' }])
-            setPending('')
-          }}
-          placeholder={placeholder}
-          searchPlaceholder="Search…"
-        />
-      )}
-      {!readOnly && onCreateOption && (
-        <div className="flex items-center gap-2">
-          <Input
-            placeholder={createPlaceholder ?? 'New option name'}
-            value={newOptVal}
-            onChange={e => setNewOptVal(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleCreate())}
-            className="flex-1"
-          />
-          <Button type="button" size="sm" variant="outline" onClick={handleCreate} disabled={creatingOpt || !newOptVal.trim()}>
-            <PlusIcon className="h-3.5 w-3.5 mr-1" /> {creatingOpt ? '...' : 'Create'}
-          </Button>
-        </div>
-      )}
-      {entries.length > 0 && (
-        <div className="rounded-md border divide-y">
-          {entries.map((e, i) => (
-            <div key={e.id} className="flex items-center gap-3 px-3 py-2">
-              <span className="text-sm font-medium w-28 shrink-0 truncate">{e.name}</span>
-              <div className="relative flex-1">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">+/- ₹</span>
-                <Input type="number" className="pl-12" value={e.price_modifier} disabled={readOnly}
-                  onChange={ev => setEntries(p => p.map((x, j) => j === i ? { ...x, price_modifier: ev.target.value } : x))} />
-              </div>
-              {!readOnly && (
-                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setEntries(p => p.filter((_, j) => j !== i))}>
-                  <XIcon className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
-  )
+function cartesian<T>(arrays: T[][]): T[][] {
+  if (arrays.length === 0) return [[]]
+  return arrays.reduce<T[][]>((acc, arr) => acc.flatMap(a => arr.map(v => [...a, v])), [[]])
 }
 
 export function ProductRequestForm({
@@ -346,9 +201,8 @@ export function ProductRequestForm({
   saving = false,
   formId = 'product-request-form',
   hideSubmit = false,
-  paperSizes = [],
-  paperTypes: paperTypeOptions = [],
   fieldCatalog: fieldCatalogProp = [],
+  cities = [],
 }: {
   initial?: ProductRequestInitial
   readOnly?: boolean
@@ -357,28 +211,10 @@ export function ProductRequestForm({
   saving?: boolean
   formId?: string
   hideSubmit?: boolean
-  paperSizes?: PaperSize[]
-  paperTypes?: PaperTypeOption[]
   fieldCatalog?: FieldDefCatalog[]
+  cities?: { id: string; name: string; state: string }[]
 }) {
   const [name, setName] = useState(initial?.name ?? '')
-  const [basePrice, setBasePrice] = useState(initial?.base_price != null ? String(initial.base_price) : '')
-  const [paperSizesSel, setPaperSizesSel] = useState<OptionEntry[]>(
-    (initial?.paper_sizes ?? []).map(s => ({ id: s.paper_size_id, name: s.name ?? '', price_modifier: String(s.price_modifier) })),
-  )
-  const [paperTypesSel, setPaperTypesSel] = useState<OptionEntry[]>(
-    (initial?.paper_types ?? []).map(t => ({ id: t.paper_type_id, name: t.name ?? '', price_modifier: String(t.price_modifier) })),
-  )
-  const [qtySlabs, setQtySlabs] = useState<QtySlab[]>(
-    (initial?.quantity_slabs ?? []).map(s => ({
-      min_qty: String(s.min_qty),
-      max_qty: s.max_qty != null ? String(s.max_qty) : '',
-      unit_price: String(s.unit_price),
-      max_completion_minutes: s.max_completion_minutes != null ? String(s.max_completion_minutes) : '',
-    })),
-  )
-  const [pendingSize, setPendingSize] = useState('')
-  const [pendingType, setPendingType] = useState('')
   const [images, setImages] = useState<string[]>(initial?.images ?? [])
   const [videoUrl, setVideoUrl] = useState(initial?.video_url ?? '')
   const [uploadingImages, setUploadingImages] = useState(false)
@@ -397,11 +233,9 @@ export function ProductRequestForm({
   const [specifications, setSpecifications] = useState<{ key: string; value: string }[]>(initial?.specifications ?? [])
   const [uploadingGuidelineIcon, setUploadingGuidelineIcon] = useState<number | null>(null)
 
-  // --- custom fields ---
-  // Catalog is supplied by the parent (loaded from /printer/products meta) — no separate fetch
+  // --- dynamic options ---
   const [fieldCatalog, setFieldCatalog] = useState<FieldDefCatalog[]>(fieldCatalogProp)
-  const [productFields, setProductFields] = useState<ProductFieldEntry[]>([])
-  const [customFieldOptionSel, setCustomFieldOptionSel] = useState<Record<string, CustomFieldOptionEntry[]>>({})
+  const [selectedOptions, setSelectedOptions] = useState<OptionEntry[]>([])
   const [pendingField, setPendingField] = useState('')
   const [creatingField, setCreatingField] = useState(false)
   const [newFieldKey, setNewFieldKey] = useState('')
@@ -412,62 +246,63 @@ export function ProductRequestForm({
   const dragFieldIndexRef = useRef<number | null>(null)
   const [fieldDragOver, setFieldDragOver] = useState<number | null>(null)
 
-  // When the catalog or initial changes, sync field catalog and init product fields
+  // --- pricing groups ---
+  const [pricingGroups, setPricingGroups] = useState<PricingGroup[]>([])
+
+  // When the catalog or initial changes, sync
   useEffect(() => {
     setFieldCatalog(fieldCatalogProp)
-  }, [fieldCatalogProp]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fieldCatalogProp])
 
   useEffect(() => {
-    const catalog = fieldCatalogProp
-    if (catalog.length === 0) return
-    // Initialize product fields from initial once catalog is available
-    const initFields = initial?.product_fields ?? []
-    if (initFields.length > 0) {
-      setProductFields(initFields.map(f => {
-        const def = catalog.find(d => d.id === f.field_definition_id)
-        return {
-          field_definition_id: f.field_definition_id,
-          label: def?.label ?? f.field_definition_id,
-          field_type: def?.field_type ?? 'text',
-          field_option_values: def?.field_option_values ?? [],
-          is_required: f.is_required ?? false,
-        }
-      }))
-      const sel: Record<string, CustomFieldOptionEntry[]> = {}
-      for (const opt of initial?.custom_field_options ?? []) {
-        if (!sel[opt.field_definition_id]) sel[opt.field_definition_id] = []
-        sel[opt.field_definition_id].push({
-          field_option_value_id: opt.field_option_value_id,
-          price_modifier: String(opt.price_modifier ?? 0),
-          is_default: opt.is_default ?? false,
-        })
-      }
-      setCustomFieldOptionSel(sel)
+    if (fieldCatalogProp.length === 0) return
+    const initOpts = initial?.options ?? []
+    if (initOpts.length > 0) {
+      setSelectedOptions(initOpts.map((o, i) => ({
+        field_definition_id: o.field_definition_id,
+        sort_order: o.sort_order ?? i,
+        is_required: o.is_required ?? false,
+        value_ids: o.value_ids ?? [],
+      })))
     }
-  }, [fieldCatalogProp, initial]) // eslint-disable-line react-hooks/exhaustive-deps
+    const initMatrix = initial?.pricing_matrix ?? []
+    if (initMatrix.length > 0) {
+      // Group flat rows by (option_value_ids + city_id) into PricingGroup[]
+      const groupMap = new Map<string, PricingGroup>()
+      for (const pm of initMatrix) {
+        const key = JSON.stringify([...(pm.option_value_ids ?? []).slice().sort(), pm.city_id ?? null])
+        const existing = groupMap.get(key)
+        const tier: PricingTier = {
+          quantity: String(pm.quantity),
+          price: String(pm.price),
+          max_completion_minutes: pm.max_completion_minutes != null ? String(pm.max_completion_minutes) : '',
+        }
+        if (existing) {
+          existing.tiers.push(tier)
+        } else {
+          groupMap.set(key, {
+            option_value_ids: pm.option_value_ids ?? [],
+            city_id: pm.city_id ?? null,
+            tiers: [tier],
+            collapsed: false,
+          })
+        }
+      }
+      setPricingGroups(Array.from(groupMap.values()))
+    }
+  }, [fieldCatalogProp, initial])
 
   function addFieldFromCatalog(def: FieldDefCatalog) {
-    if (productFields.some(f => f.field_definition_id === def.id)) return
-    setProductFields(p => [...p, {
+    if (selectedOptions.some(o => o.field_definition_id === def.id)) return
+    const valueIds = OPTION_FIELD_TYPES.has(def.field_type)
+      ? def.field_option_values.slice().sort((a, b) => a.sort_order - b.sort_order).map(ov => ov.id)
+      : []
+    setSelectedOptions(prev => [...prev, {
       field_definition_id: def.id,
-      label: def.label,
-      field_type: def.field_type,
-      field_option_values: def.field_option_values,
+      sort_order: prev.length,
       is_required: false,
+      value_ids: valueIds,
     }])
-    if (OPTION_FIELD_TYPES.has(def.field_type) && def.field_option_values.length > 0) {
-      setCustomFieldOptionSel(prev => ({
-        ...prev,
-        [def.id]: def.field_option_values
-          .slice()
-          .sort((a, b) => a.sort_order - b.sort_order)
-          .map((ov, i) => ({
-            field_option_value_id: ov.id,
-            price_modifier: '0',
-            is_default: i === 0,
-          })),
-      }))
-    }
   }
 
   async function handleCreateField() {
@@ -487,7 +322,6 @@ export function ProductRequestForm({
         field_type: newFieldType,
         options,
       })
-      // Append to local catalog so it's immediately available — no re-fetch needed
       const newDef: FieldDefCatalog = {
         ...res.data,
         field_option_values: (res.data as any).field_option_values ?? [],
@@ -516,12 +350,142 @@ export function ProductRequestForm({
     if (from === null || from === targetIndex) return
     dragFieldIndexRef.current = null
     setFieldDragOver(null)
-    setProductFields(prev => {
+    setSelectedOptions(prev => {
       const arr = [...prev]
       const [moved] = arr.splice(from, 1)
       arr.splice(targetIndex, 0, moved)
-      return arr
+      return arr.map((o, i) => ({ ...o, sort_order: i }))
     })
+  }
+
+  function toggleValueId(optIndex: number, fovId: string) {
+    setSelectedOptions(prev => prev.map((opt, i) => {
+      if (i !== optIndex) return opt
+      const has = opt.value_ids.includes(fovId)
+      return { ...opt, value_ids: has ? opt.value_ids.filter(v => v !== fovId) : [...opt.value_ids, fovId] }
+    }))
+  }
+
+  /* ── Pricing Group helpers ── */
+
+  function getFieldDef(fieldDefId: string) {
+    return fieldCatalog.find(d => d.id === fieldDefId)
+  }
+
+  function addPricingGroup() {
+    const defaultValueIds = selectedOptions
+      .filter(o => {
+        const def = getFieldDef(o.field_definition_id)
+        return def && OPTION_FIELD_TYPES.has(def.field_type)
+      })
+      .map(o => o.value_ids[0] ?? '')
+      .filter(Boolean)
+    setPricingGroups(prev => [...prev, {
+      option_value_ids: defaultValueIds,
+      city_id: null,
+      tiers: [{ quantity: '', price: '', max_completion_minutes: '' }],
+      collapsed: false,
+    }])
+  }
+
+  function removePricingGroup(i: number) {
+    setPricingGroups(prev => prev.filter((_, j) => j !== i))
+  }
+
+  function updateGroupOptionValue(groupIdx: number, fieldDefId: string, newValueId: string) {
+    setPricingGroups(prev => prev.map((g, i) => {
+      if (i !== groupIdx) return g
+      const fd = getFieldDef(fieldDefId)
+      if (!fd) return g
+      const allValuesForField = new Set(fd.field_option_values.map(v => v.id))
+      const filtered = g.option_value_ids.filter(id => !allValuesForField.has(id))
+      return { ...g, option_value_ids: [...filtered, newValueId] }
+    }))
+  }
+
+  function updateGroupCity(groupIdx: number, cityId: string | null) {
+    setPricingGroups(prev => prev.map((g, i) => i === groupIdx ? { ...g, city_id: cityId } : g))
+  }
+
+  function addTier(groupIdx: number) {
+    setPricingGroups(prev => prev.map((g, i) =>
+      i === groupIdx ? { ...g, tiers: [...g.tiers, { quantity: '', price: '', max_completion_minutes: '' }] } : g
+    ))
+  }
+
+  function removeTier(groupIdx: number, tierIdx: number) {
+    setPricingGroups(prev => prev.map((g, i) =>
+      i === groupIdx ? { ...g, tiers: g.tiers.filter((_, j) => j !== tierIdx) } : g
+    ))
+  }
+
+  function updateTier(groupIdx: number, tierIdx: number, field: keyof PricingTier, value: string) {
+    setPricingGroups(prev => prev.map((g, i) =>
+      i === groupIdx ? { ...g, tiers: g.tiers.map((t, j) => j === tierIdx ? { ...t, [field]: value } : t) } : g
+    ))
+  }
+
+  function toggleGroupCollapse(i: number) {
+    setPricingGroups(prev => prev.map((g, j) => j === i ? { ...g, collapsed: !g.collapsed } : g))
+  }
+
+  function generateAllCombinations() {
+    const optionArrays = selectedOptions
+      .filter(o => {
+        const def = getFieldDef(o.field_definition_id)
+        return def && OPTION_FIELD_TYPES.has(def.field_type)
+      })
+      .map(o => {
+        const fd = getFieldDef(o.field_definition_id)
+        return o.value_ids.map(vid => {
+          const fov = fd?.field_option_values.find(v => v.id === vid)
+          return { id: vid, label: fov?.value ?? vid }
+        })
+      })
+      .filter(a => a.length > 0)
+
+    if (optionArrays.length === 0) {
+      toast.error('Add at least one product option with values first')
+      return
+    }
+
+    const combos = cartesian(optionArrays)
+
+    const newGroups: PricingGroup[] = combos.map(combo => ({
+      option_value_ids: combo.map(v => v.id),
+      city_id: null,
+      tiers: [{ quantity: '', price: '', max_completion_minutes: '' }],
+      collapsed: false,
+    }))
+
+    setPricingGroups(prev => [...prev, ...newGroups])
+    toast.success(`Generated ${newGroups.length} pricing groups`)
+  }
+
+  function getGroupLabel(group: PricingGroup): string {
+    const parts: string[] = []
+    for (const o of selectedOptions) {
+      const fd = getFieldDef(o.field_definition_id)
+      if (!fd || !OPTION_FIELD_TYPES.has(fd.field_type)) continue
+      const allValuesForField = new Set(fd.field_option_values.map(v => v.id))
+      const selectedId = group.option_value_ids.find(id => allValuesForField.has(id))
+      const fov = fd.field_option_values.find(v => v.id === selectedId)
+      if (fov) parts.push(fov.value)
+    }
+    if (group.city_id) {
+      const city = cities.find(c => c.id === group.city_id)
+      if (city) parts.push(city.name)
+    } else {
+      parts.push('All Cities')
+    }
+    return parts.join(' · ') || 'New Group'
+  }
+
+  function getSelectedValueForField(group: PricingGroup, fieldDefId: string): string {
+    const fd = getFieldDef(fieldDefId)
+    if (!fd) return ''
+    const allValuesForField = new Set(fd.field_option_values.map(v => v.id))
+    return group.option_value_ids.find(id => allValuesForField.has(id)) ?? ''
   }
 
   const descEditor = useEditor({
@@ -548,30 +512,7 @@ export function ProductRequestForm({
       descEditor.commands.setContent(initial.description)
   }, [initial?.description, descEditor])
 
-  const [localPaperSizes, setLocalPaperSizes] = useState(paperSizes)
-  const [localPaperTypes, setLocalPaperTypes] = useState(paperTypeOptions)
-  useEffect(() => { setLocalPaperSizes(paperSizes) }, [paperSizes])
-  useEffect(() => { setLocalPaperTypes(paperTypeOptions) }, [paperTypeOptions])
-
-  const availableSizes = localPaperSizes.filter(s => !paperSizesSel.some(x => x.id === s.id))
-  const availableTypes = localPaperTypes.filter(t => !paperTypesSel.some(x => x.id === t.id))
-  const availableFieldsForPicker = fieldCatalog.filter(d => !productFields.some(f => f.field_definition_id === d.id))
-
-  async function createPaperSize(name: string) {
-    const res = await api.post<{ data: PaperSize }>('/printer/paper/sizes', { name, sort_order: localPaperSizes.length })
-    const created = res.data
-    setLocalPaperSizes(prev => [...prev, created])
-    setPaperSizesSel(prev => [...prev, { id: created.id, name: created.name, price_modifier: '' }])
-    toast.success(`Paper size "${name}" created`)
-  }
-
-  async function createPaperType(name: string) {
-    const res = await api.post<{ data: PaperTypeOption }>('/printer/paper/types', { name, sort_order: localPaperTypes.length })
-    const created = res.data
-    setLocalPaperTypes(prev => [...prev, created])
-    setPaperTypesSel(prev => [...prev, { id: created.id, name: created.name, price_modifier: '' }])
-    toast.success(`Paper type "${name}" created`)
-  }
+  const availableFieldsForPicker = fieldCatalog.filter(d => !selectedOptions.some(o => o.field_definition_id === d.id))
 
   async function uploadImageFiles(files: File[]) {
     if (!files.length || readOnly) return
@@ -628,12 +569,34 @@ export function ProductRequestForm({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!onSubmit || readOnly) return
-    const payload = buildProductRequestPayload(
-      name, basePrice, getDescriptionHtml(), paperSizesSel,
-      paperTypesSel, qtySlabs, images, videoUrl,
-      productFields, customFieldOptionSel,
-      faqs, finishAndCare, guidelinesArr, specifications,
-    )
+    const descHtml = getDescriptionHtml()
+    const payload: ProductRequestPayload = {
+      name: name.trim(),
+      description: descHtml || null,
+      images,
+      video_url: videoUrl || null,
+      options: selectedOptions.map((o, i) => ({
+        field_definition_id: o.field_definition_id,
+        sort_order: i,
+        is_required: o.is_required,
+        value_ids: o.value_ids,
+      })),
+      pricing_matrix: pricingGroups.flatMap(group =>
+        group.tiers
+          .filter(t => t.quantity && t.price)
+          .map(t => ({
+            quantity: Number(t.quantity),
+            price: Number(t.price),
+            max_completion_minutes: t.max_completion_minutes ? Number(t.max_completion_minutes) : null,
+            option_value_ids: group.option_value_ids,
+            city_id: group.city_id || null,
+          }))
+      ),
+      faqs: faqs.filter(f => f.question.trim()),
+      finish_and_care: finishAndCare.filter(p => p.trim()),
+      guidelines: guidelinesArr.filter(g => g.title.trim()),
+      specifications: specifications.filter(s => s.key.trim()),
+    }
     onSubmit(payload)
   }
 
@@ -644,15 +607,11 @@ export function ProductRequestForm({
       <section className="space-y-3">
         <div className="flex items-center gap-1.5">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Basic info</p>
-          <InfoTooltip text="The product name shown to customers and the base price per unit before any size, quality, or quantity adjustments are applied." />
+          <InfoTooltip text="The product name shown to customers." />
         </div>
         <div className="space-y-1.5">
           <Label>Product name *</Label>
           <Input value={name} onChange={e => setName(e.target.value)} disabled={disabled} required />
-        </div>
-        <div className="space-y-1.5">
-          <Label>Base price (₹) *</Label>
-          <Input type="number" value={basePrice} onChange={e => setBasePrice(e.target.value)} disabled={disabled} required />
         </div>
       </section>
 
@@ -674,8 +633,8 @@ export function ProductRequestForm({
               <ToolbarButton onClick={() => descEditor?.chain().focus().toggleBulletList().run()} active={descEditor?.isActive('bulletList')}>Bullet List</ToolbarButton>
               <ToolbarButton onClick={() => descEditor?.chain().focus().toggleOrderedList().run()} active={descEditor?.isActive('orderedList')}>Ordered List</ToolbarButton>
               <div className="w-px h-5 bg-border mx-1" />
-              <ToolbarButton onClick={() => descEditor?.chain().focus().undo().run()} disabled={!descEditor?.can().undo()}>↩</ToolbarButton>
-              <ToolbarButton onClick={() => descEditor?.chain().focus().redo().run()} disabled={!descEditor?.can().redo()}>↪</ToolbarButton>
+              <ToolbarButton onClick={() => descEditor?.chain().focus().undo().run()} disabled={!descEditor?.can().undo()}>&#x21A9;</ToolbarButton>
+              <ToolbarButton onClick={() => descEditor?.chain().focus().redo().run()} disabled={!descEditor?.can().redo()}>&#x21AA;</ToolbarButton>
               <div className="w-px h-5 bg-border mx-1" />
               <ToolbarButton onClick={toggleDescHtml} active={showDescHtml} disabled={!descEditor}>{'</>'}</ToolbarButton>
             </div>
@@ -789,72 +748,11 @@ export function ProductRequestForm({
         )}
       </section>
 
-      <VariantOptionSection
-        title="Paper sizes"
-        description="Select the paper sizes this product can be printed in. For each size, enter how much to add (+) or subtract (-) from the base price per unit. Leave blank or enter 0 if the size has no extra charge."
-        readOnly={readOnly}
-        entries={paperSizesSel}
-        setEntries={setPaperSizesSel}
-        available={availableSizes}
-        pending={pendingSize}
-        setPending={setPendingSize}
-        placeholder="Select size…"
-        onCreateOption={readOnly ? undefined : createPaperSize}
-        createPlaceholder="e.g. A4, A5, 3.5x2 in"
-      />
-
-      <VariantOptionSection
-        title="Paper type"
-        description="Select the paper types (e.g. Glossy, Matte, Kraft) available for this product. Enter how much to add (+) or subtract (-) from the base price per unit for each type. Leave blank or enter 0 for no extra charge."
-        readOnly={readOnly}
-        entries={paperTypesSel}
-        setEntries={setPaperTypesSel}
-        available={availableTypes}
-        pending={pendingType}
-        setPending={setPendingType}
-        placeholder="Select type…"
-        onCreateOption={readOnly ? undefined : createPaperType}
-        createPlaceholder="e.g. Glossy, Matte, Kraft"
-      />
-
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Quantity slabs</p>
-            <InfoTooltip text="Set price adjustments based on order quantity. For each range, enter how much to add (+) or subtract (-) per unit from the base price. Also set the maximum time (in minutes) to fulfill orders in that range. Leave Max Qty blank for open-ended slabs (e.g. 100+)." />
-          </div>
-          {!readOnly && (
-            <Button type="button" variant="outline" size="sm" onClick={() => setQtySlabs(p => [...p, { min_qty: '', max_qty: '', unit_price: '', max_completion_minutes: '' }])}>
-              <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add slab
-            </Button>
-          )}
-        </div>
-        {qtySlabs.map((slab, i) => (
-          <div key={i} className="grid grid-cols-4 gap-2 items-center">
-            <Input type="number" placeholder="Min qty" value={slab.min_qty} disabled={readOnly}
-              onChange={e => setQtySlabs(p => p.map((x, j) => j === i ? { ...x, min_qty: e.target.value } : x))} />
-            <Input type="number" placeholder="Max (∞ blank)" value={slab.max_qty} disabled={readOnly}
-              onChange={e => setQtySlabs(p => p.map((x, j) => j === i ? { ...x, max_qty: e.target.value } : x))} />
-            <Input type="number" placeholder="Base unit ₹" value={slab.unit_price} disabled={readOnly}
-              onChange={e => setQtySlabs(p => p.map((x, j) => j === i ? { ...x, unit_price: e.target.value } : x))} />
-            <div className="flex gap-1">
-              <Input type="number" placeholder="Completion (min)" value={slab.max_completion_minutes} disabled={readOnly}
-                onChange={e => setQtySlabs(p => p.map((x, j) => j === i ? { ...x, max_completion_minutes: e.target.value } : x))} />
-              {!readOnly && (
-                <Button type="button" variant="ghost" size="icon-sm" onClick={() => setQtySlabs(p => p.filter((_, j) => j !== i))}>
-                  <XIcon className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-          </div>
-        ))}
-      </section>
-
-      {/* Custom fields */}
+      {/* Dynamic options */}
       <section className="space-y-3">
         <div className="flex items-center gap-1.5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Custom fields</p>
-          <InfoTooltip text="Add configurable fields customers will see when ordering this product (e.g. Finish, Binding style). You can pick from existing field types or create a new one." />
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Product options</p>
+          <InfoTooltip text="Add configurable options customers will see when ordering (e.g. Paper Size, Finish, Binding style). Pick from the catalog or create a new field type. For each option, select which values are available for this product." />
         </div>
 
         {!readOnly && (
@@ -870,7 +768,7 @@ export function ProductRequestForm({
                     addFieldFromCatalog(def)
                     setPendingField('')
                   }}
-                  placeholder="Add field from catalog…"
+                  placeholder="Add option from catalog…"
                   searchPlaceholder="Search field types…"
                 />
               </div>
@@ -949,144 +847,268 @@ export function ProductRequestForm({
           </div>
         )}
 
-        {productFields.length > 0 && (
+        {selectedOptions.length > 0 && (
           <div className="rounded-md border divide-y">
-            {productFields.map((field, i) => (
-              <div
-                key={field.field_definition_id}
-                draggable={!readOnly}
-                onDragStart={() => onFieldDragStart(i)}
-                onDragOver={e => { e.preventDefault(); setFieldDragOver(i) }}
-                onDragLeave={() => setFieldDragOver(null)}
-                onDrop={() => onFieldDrop(i)}
-                className={`p-3 space-y-2 transition-colors ${fieldDragOver === i ? 'bg-primary/5' : ''}`}
-              >
-                <div className="flex items-center gap-2">
-                  {!readOnly && (
-                    <GripVerticalIcon className="h-4 w-4 text-muted-foreground cursor-grab shrink-0" />
-                  )}
-                  <span className="text-sm font-medium flex-1">{field.label}</span>
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
-                    {field.field_type}
-                  </span>
-                  {!readOnly && (
-                    <>
-                      <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={field.is_required}
-                          onChange={e => setProductFields(p => p.map((f, j) => j === i ? { ...f, is_required: e.target.checked } : f))}
-                          className="rounded"
-                        />
-                        Required
-                      </label>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => {
-                          setProductFields(p => p.filter((_, j) => j !== i))
-                          setCustomFieldOptionSel(prev => {
-                            const next = { ...prev }
-                            delete next[field.field_definition_id]
-                            return next
-                          })
-                        }}
-                      >
-                        <XIcon className="h-3.5 w-3.5" />
-                      </Button>
-                    </>
-                  )}
-                  {readOnly && field.is_required && (
-                    <span className="text-xs text-destructive">required</span>
-                  )}
-                </div>
-
-                {/* Option list for select/radio/boolean/multi_select */}
-                {OPTION_FIELD_TYPES.has(field.field_type) && (
-                  <div className="ml-6 space-y-1">
-                    {(customFieldOptionSel[field.field_definition_id] ?? []).length > 0 && (
-                      <p className="text-xs text-muted-foreground mb-1">Options — set price modifier and default:</p>
-                    )}
-                    {(customFieldOptionSel[field.field_definition_id] ?? []).map((entry, oi) => {
-                      const ov = field.field_option_values.find(v => v.id === entry.field_option_value_id)
-                      return (
-                        <div key={entry.field_option_value_id} className="flex items-center gap-2">
-                          {!readOnly && (
-                            <input
-                              type="radio"
-                              name={`default_${field.field_definition_id}`}
-                              checked={entry.is_default}
-                              onChange={() => setCustomFieldOptionSel(prev => ({
-                                ...prev,
-                                [field.field_definition_id]: (prev[field.field_definition_id] ?? []).map((e, ei) => ({
-                                  ...e,
-                                  is_default: ei === oi,
-                                })),
-                              }))}
-                              title="Set as default"
-                              className="shrink-0"
-                            />
-                          )}
-                          <span className="text-xs w-28 shrink-0 truncate">{ov?.value ?? entry.field_option_value_id}</span>
-                          <div className="relative flex-1 max-w-[120px]">
-                            <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">+/- ₹</span>
-                            <Input
-                              type="number"
-                              className="pl-9 h-7 text-xs"
-                              value={entry.price_modifier}
-                              disabled={readOnly}
-                              onChange={ev => setCustomFieldOptionSel(prev => ({
-                                ...prev,
-                                [field.field_definition_id]: (prev[field.field_definition_id] ?? []).map((e, ei) =>
-                                  ei === oi ? { ...e, price_modifier: ev.target.value } : e
-                                ),
-                              }))}
-                            />
-                          </div>
-                          {entry.is_default && (
-                            <span className="text-xs text-muted-foreground">(default)</span>
-                          )}
-                        </div>
-                      )
-                    })}
+            {selectedOptions.map((opt, i) => {
+              const def = fieldCatalog.find(d => d.id === opt.field_definition_id)
+              const label = def?.label ?? opt.field_definition_id
+              const hasOptionValues = def && OPTION_FIELD_TYPES.has(def.field_type)
+              return (
+                <div
+                  key={opt.field_definition_id}
+                  draggable={!readOnly}
+                  onDragStart={() => onFieldDragStart(i)}
+                  onDragOver={e => { e.preventDefault(); setFieldDragOver(i) }}
+                  onDragLeave={() => setFieldDragOver(null)}
+                  onDrop={() => onFieldDrop(i)}
+                  className={`p-3 space-y-2 transition-colors ${fieldDragOver === i ? 'bg-primary/5' : ''}`}
+                >
+                  <div className="flex items-center gap-2">
                     {!readOnly && (
-                      <InlineOptionCreator
-                        fieldDefId={field.field_definition_id}
-                        onCreated={(opt) => {
-                          setFieldCatalog(prev => prev.map(fd =>
-                            fd.id === field.field_definition_id
-                              ? { ...fd, field_option_values: [...fd.field_option_values, opt] }
-                              : fd
-                          ))
-                          setProductFields(prev => prev.map(pf =>
-                            pf.field_definition_id === field.field_definition_id
-                              ? { ...pf, field_option_values: [...pf.field_option_values, opt] }
-                              : pf
-                          ))
-                          setCustomFieldOptionSel(prev => ({
-                            ...prev,
-                            [field.field_definition_id]: [...(prev[field.field_definition_id] ?? []),
-                              { field_option_value_id: opt.id, price_modifier: '', is_default: (prev[field.field_definition_id] ?? []).length === 0 }],
-                          }))
-                        }}
-                      />
+                      <GripVerticalIcon className="h-4 w-4 text-muted-foreground cursor-grab shrink-0" />
+                    )}
+                    <span className="text-sm font-medium flex-1">{label}</span>
+                    <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                      {def?.field_type ?? 'unknown'}
+                    </span>
+                    {!readOnly && (
+                      <>
+                        <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            checked={opt.is_required}
+                            onChange={e => setSelectedOptions(p => p.map((o, j) => j === i ? { ...o, is_required: e.target.checked } : o))}
+                            className="rounded"
+                          />
+                          Required
+                        </label>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={() => setSelectedOptions(p => p.filter((_, j) => j !== i))}
+                        >
+                          <XIcon className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
+                    )}
+                    {readOnly && opt.is_required && (
+                      <span className="text-xs text-destructive">required</span>
                     )}
                   </div>
-                )}
 
-                {/* Read-only display of required flag */}
-                {readOnly && !OPTION_FIELD_TYPES.has(field.field_type) && (
-                  <p className="ml-6 text-xs text-muted-foreground">Customer input — no price options</p>
-                )}
-              </div>
-            ))}
+                  {/* Value selection for option-type fields */}
+                  {hasOptionValues && def.field_option_values.length > 0 && (
+                    <div className="ml-6 space-y-1">
+                      <p className="text-xs text-muted-foreground mb-1">Select which values are available:</p>
+                      {def.field_option_values
+                        .slice()
+                        .sort((a, b) => a.sort_order - b.sort_order)
+                        .map(ov => {
+                          const isSelected = opt.value_ids.includes(ov.id)
+                          return (
+                            <label key={ov.id} className="flex items-center gap-2 text-xs cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                disabled={readOnly}
+                                onChange={() => toggleValueId(i, ov.id)}
+                                className="rounded"
+                              />
+                              <span>{ov.value}</span>
+                            </label>
+                          )
+                        })}
+                      {!readOnly && (
+                        <InlineOptionCreator
+                          fieldDefId={opt.field_definition_id}
+                          onCreated={(newOpt) => {
+                            setFieldCatalog(prev => prev.map(fd =>
+                              fd.id === opt.field_definition_id
+                                ? { ...fd, field_option_values: [...fd.field_option_values, newOpt] }
+                                : fd
+                            ))
+                            // Auto-select the new option
+                            setSelectedOptions(prev => prev.map((o, j) =>
+                              j === i ? { ...o, value_ids: [...o.value_ids, newOpt.id] } : o
+                            ))
+                          }}
+                        />
+                      )}
+                    </div>
+                  )}
+
+                  {/* Read-only display for non-option fields */}
+                  {readOnly && !hasOptionValues && (
+                    <p className="ml-6 text-xs text-muted-foreground">Customer input — no selectable values</p>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
 
-        {readOnly && productFields.length === 0 && (
-          <p className="text-sm text-muted-foreground">No custom fields</p>
+        {readOnly && selectedOptions.length === 0 && (
+          <p className="text-sm text-muted-foreground">No product options</p>
         )}
+      </section>
+
+      {/* Pricing matrix — grouped UI */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pricing matrix</p>
+            <InfoTooltip text="Each group represents one option combination (+ optional city). Add quantity / price tiers within each group." />
+          </div>
+        </div>
+
+        {!readOnly && (
+          <div className="flex items-center gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={addPricingGroup}>
+              <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add Pricing Group
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={generateAllCombinations}>
+              <WandSparklesIcon className="h-3.5 w-3.5 mr-1" /> Generate All Combinations
+            </Button>
+          </div>
+        )}
+
+        {pricingGroups.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            {readOnly ? 'No pricing defined.' : 'No pricing groups yet.'}
+          </p>
+        )}
+
+        {pricingGroups.map((group, gi) => (
+          <div key={gi} className="rounded-md border">
+            {/* Group header */}
+            <div
+              className="flex items-center gap-2 px-4 py-3 bg-muted/30 cursor-pointer"
+              onClick={() => toggleGroupCollapse(gi)}
+            >
+              {group.collapsed
+                ? <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                : <ChevronDownIcon className="h-4 w-4 text-muted-foreground" />
+              }
+              <span className="text-sm font-medium flex-1">{getGroupLabel(group)}</span>
+              <span className="text-xs text-muted-foreground">{group.tiers.length} tier{group.tiers.length !== 1 ? 's' : ''}</span>
+              {!readOnly && (
+                <Button type="button" variant="ghost" size="icon-sm" onClick={e => { e.stopPropagation(); removePricingGroup(gi) }}>
+                  <Trash2 className="h-3.5 w-3.5 text-destructive" />
+                </Button>
+              )}
+            </div>
+
+            {!group.collapsed && (
+              <div className="p-4 space-y-4">
+                {/* Option selectors + city */}
+                {!readOnly && (
+                  <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+                    {selectedOptions.map(opt => {
+                      const fd = getFieldDef(opt.field_definition_id)
+                      if (!fd || !OPTION_FIELD_TYPES.has(fd.field_type)) return null
+                      const selectedValue = getSelectedValueForField(group, fd.id)
+                      const availableValues = fd.field_option_values.filter(v => opt.value_ids.includes(v.id))
+
+                      const selectedLabel = availableValues.find(v => v.id === selectedValue)?.value
+
+                      return (
+                        <div key={fd.id}>
+                          <Label className="text-xs">{fd.label}</Label>
+                          <Select value={selectedValue} onValueChange={v => updateGroupOptionValue(gi, fd.id, v)}>
+                            <SelectTrigger className="mt-1 h-9 text-sm">
+                              {selectedLabel
+                                ? <span>{selectedLabel}</span>
+                                : <SelectValue placeholder={`Select ${fd.label}`} />
+                              }
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableValues.sort((a, b) => a.sort_order - b.sort_order).map(v => (
+                                <SelectItem key={v.id} value={v.id}>{v.value}</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )
+                    })}
+                    <div>
+                      <Label className="text-xs">City</Label>
+                      <Select value={group.city_id ?? '__all__'} onValueChange={v => updateGroupCity(gi, v === '__all__' ? null : v)}>
+                        <SelectTrigger className="mt-1 h-9 text-sm">
+                          <span>{group.city_id ? (cities.find(c => c.id === group.city_id)?.name ?? 'Unknown') : 'All Cities'}</span>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__all__">All Cities</SelectItem>
+                          {cities.map(c => (
+                            <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                )}
+
+                {/* Read-only option/city display */}
+                {readOnly && (
+                  <p className="text-sm text-muted-foreground">{getGroupLabel(group)}</p>
+                )}
+
+                {/* Tier rows */}
+                <div>
+                  <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 text-xs font-medium text-muted-foreground mb-1 px-1">
+                    <span>Quantity</span>
+                    <span>Price (&#x20B9;)</span>
+                    <span>Completion (min)</span>
+                    <span></span>
+                  </div>
+                  {group.tiers.map((tier, ti) => (
+                    <div key={ti} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 mb-1.5">
+                      <Input
+                        type="number"
+                        min={1}
+                        placeholder="25"
+                        value={tier.quantity}
+                        onChange={e => updateTier(gi, ti, 'quantity', e.target.value)}
+                        className="h-9"
+                        disabled={readOnly}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        placeholder="120"
+                        value={tier.price}
+                        onChange={e => updateTier(gi, ti, 'price', e.target.value)}
+                        className="h-9"
+                        disabled={readOnly}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        placeholder="Optional"
+                        value={tier.max_completion_minutes}
+                        onChange={e => updateTier(gi, ti, 'max_completion_minutes', e.target.value)}
+                        className="h-9"
+                        disabled={readOnly}
+                      />
+                      {!readOnly && (
+                        <Button type="button" variant="ghost" size="icon-sm" className="h-9 w-9" onClick={() => removeTier(gi, ti)} disabled={group.tiers.length <= 1}>
+                          <XIcon className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      {readOnly && <div />}
+                    </div>
+                  ))}
+                  {!readOnly && (
+                    <Button type="button" variant="outline" size="sm" className="mt-1" onClick={() => addTier(gi)}>
+                      <PlusIcon className="h-3.5 w-3.5 mr-1" /> Add Tier
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
       </section>
 
       {/* ── FAQs ── */}

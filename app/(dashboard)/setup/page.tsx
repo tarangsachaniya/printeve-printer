@@ -320,7 +320,6 @@ export default function SetupPage() {
                         className="h-4 w-4 rounded border-input accent-primary cursor-pointer shrink-0"
                       />
                       <span className="text-sm font-medium flex-1">{p.name}</span>
-                      <span className="text-sm text-muted-foreground">₹{p.base_price?.toLocaleString('en-IN')}</span>
                     </label>
                   ))}
                 </div>
