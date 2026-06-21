@@ -1015,7 +1015,7 @@ export function ProductRequestForm({
                       return (
                         <div key={fd.id}>
                           <Label className="text-xs">{fd.label}</Label>
-                          <Select value={selectedValue} onValueChange={v => updateGroupOptionValue(gi, fd.id, v)}>
+                          <Select value={selectedValue} onValueChange={v => { if (v) updateGroupOptionValue(gi, fd.id, v) }}>
                             <SelectTrigger className="mt-1 h-9 text-sm">
                               {selectedLabel
                                 ? <span>{selectedLabel}</span>
