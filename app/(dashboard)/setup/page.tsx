@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import { useBootstrap } from '@/context/bootstrap-context'
@@ -9,16 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
-import dynamic from 'next/dynamic'
-import '@excalidraw/excalidraw/index.css'
-
-const Excalidraw = dynamic(
-  async () => {
-    const mod = await import('@excalidraw/excalidraw')
-    return mod.Excalidraw
-  },
-  { ssr: false }
-)
+import { SignatureCanvas } from '@/components/signature-canvas'
 
 const CLOUD_NAME   = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME   ?? ''
 const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? ''
@@ -73,7 +64,13 @@ export default function SetupPage() {
   const legalHtml = agreement?.legal_terms ?? ''
   const [agreed, setAgreed] = useState(false)
   const [signed, setSigned] = useState(false)
-  const [excalidrawAPI, setExcalidrawAPI] = useState<any>(null)
+  const signatureRef = useRef<HTMLCanvasElement>(null)
+
+  async function getSignatureDataUrl(): Promise<string> {
+    if (!signatureRef.current) throw new Error('Signature pad not ready')
+    return uploadSignatureToCloudinary(signatureRef.current, 'signature')
+  }
+
   // Step 1 — Password
   const [oldPassword, setOldPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -390,8 +387,8 @@ export default function SetupPage() {
               {agreed && (
                 <div className="space-y-3 pt-1">
                   <div className="h-px bg-border" />
-                  <SignatureExcalidraw
-                    onAPIReady={setExcalidrawAPI}
+                  <SignatureCanvas
+                    canvasRef={signatureRef}
                     onSigned={setSigned}
                   />
                 </div>
