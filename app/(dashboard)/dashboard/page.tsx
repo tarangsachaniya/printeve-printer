@@ -24,7 +24,7 @@ interface Job {
 }
 
 interface JobsResponse {
-  items: Job[]
+  data: { items: Job[] }
 }
 
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
@@ -42,7 +42,7 @@ export default function DashboardPage() {
   function fetchAll(silent = false) {
     if (!silent) setLoading(true)
     return api.get<JobsResponse>('/printer/jobs')
-      .then((res) => setJobs(res.items ?? []))
+      .then((res) => setJobs(res.data?.items ?? []))
       .catch(() => {})
       .finally(() => { if (!silent) setLoading(false) })
   }

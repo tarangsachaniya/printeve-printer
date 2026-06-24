@@ -23,7 +23,7 @@ interface Job {
 }
 
 interface JobsResponse {
-  items: Job[]
+  data: { items: Job[] }
 }
 
 const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | 'destructive'> = {
@@ -41,7 +41,7 @@ export default function JobsPage() {
   function fetchJobs(silent = false) {
     if (!silent) setLoading(true)
     return api.get<JobsResponse>('/printer/jobs')
-      .then((res) => setJobs(res.items ?? []))
+      .then((res) => setJobs(res.data?.items ?? []))
       .catch((err) => toast.error(err.message ?? 'Failed to load jobs'))
       .finally(() => { if (!silent) setLoading(false) })
   }
