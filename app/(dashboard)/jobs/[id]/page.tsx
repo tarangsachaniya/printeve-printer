@@ -32,13 +32,9 @@ interface JobDetail {
   subtotal: number
   delivery_fee: number
   platform_fee: number
-  delivery_city: string | null
-  delivery_pincode: string | null
   expected_delivery_at: string | null
   accepted_at: string | null
   created_at: string
-  customer: { full_name: string; phone: string; email: string } | null
-  address: { full_name: string; phone: string; line1: string; line2?: string; city: string; state: string; pincode: string } | null
   items: OrderItem[]
 }
 
@@ -126,30 +122,15 @@ export default function JobDetailPage() {
         {job.assignment_type && <Badge variant="outline">{job.assignment_type}</Badge>}
       </div>
 
-      {/* Customer & delivery — revealed only after assignment */}
-      <Card>
-        <CardHeader><CardTitle>Customer & Delivery</CardTitle></CardHeader>
-        <CardContent className="grid grid-cols-2 gap-y-2 text-sm">
-          <span className="text-muted-foreground">Name</span>
-          <span>{job.customer?.full_name ?? job.address?.full_name ?? '—'}</span>
-          <span className="text-muted-foreground">Phone</span>
-          <span>{job.customer?.phone ?? job.address?.phone ?? '—'}</span>
-          <span className="text-muted-foreground">Email</span>
-          <span>{job.customer?.email ?? '—'}</span>
-          <span className="text-muted-foreground">Address</span>
-          <span>
-            {job.address
-              ? [job.address.line1, job.address.line2, job.address.city, job.address.state, job.address.pincode].filter(Boolean).join(', ')
-              : [job.delivery_city, job.delivery_pincode].filter(Boolean).join(', ') || '—'}
-          </span>
-          {job.expected_delivery_at && (
-            <>
-              <span className="text-muted-foreground">Expected delivery</span>
-              <span>{new Date(job.expected_delivery_at).toLocaleDateString()}</span>
-            </>
-          )}
-        </CardContent>
-      </Card>
+      {job.expected_delivery_at && (
+        <Card>
+          <CardHeader><CardTitle>Delivery</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-2 gap-y-2 text-sm">
+            <span className="text-muted-foreground">Expected delivery</span>
+            <span>{new Date(job.expected_delivery_at).toLocaleDateString()}</span>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader><CardTitle>Items</CardTitle></CardHeader>

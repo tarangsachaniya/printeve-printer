@@ -3,18 +3,17 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { LayoutDashboard, Briefcase, User, Package, LogOut, Radio, IndianRupee } from 'lucide-react'
+import { LayoutDashboard, Briefcase, User, LogOut, Radio, IndianRupee } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { logout, getCurrentUser, type PrinterUser } from '@/lib/auth'
 import { Button } from '@/components/ui/button'
 
 const navItems = [
-  { href: '/dashboard',        label: 'Dashboard',       icon: LayoutDashboard },
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/available-orders', label: 'Available Orders', icon: Radio },
-  { href: '/jobs',             label: 'My Jobs',         icon: Briefcase },
-  { href: '/pricing',          label: 'My Pricing',      icon: IndianRupee },
-  { href: '/products',         label: 'Products',        icon: Package },
-  { href: '/profile',          label: 'Profile',         icon: User },
+  { href: '/jobs', label: 'My Jobs', icon: Briefcase },
+  { href: '/pricing', label: 'My Pricing', icon: IndianRupee },
+  { href: '/profile', label: 'Profile', icon: User },
 ]
 
 export function PrinterSidebar() {

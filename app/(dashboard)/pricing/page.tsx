@@ -2,14 +2,16 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { toast } from 'sonner'
-import { Plus, Trash2 } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { api } from '@/lib/api'
-import { useBootstrap } from '@/context/bootstrap-context'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from '@/components/ui/dialog'
 
 interface ProductOptionValue { field_option_value_id: string; value: string }
 interface ProductOption {
@@ -18,60 +20,113 @@ interface ProductOption {
   field_type: string
   values: ProductOptionValue[]
 }
-interface City { id: string; name: string }
 
-interface PricingRow {
-  quantity: string
-  price: string
-  max_completion_minutes: string
-  city_id: string | null
-  // field_definition_id -> field_option_value_id
-  options: Record<string, string>
+interface CatalogProduct {
+  id: string
+  name: string
+  slug: string | null
+  starting_price: number | null
+  selected: boolean
 }
 
-const OPTION_TYPES = new Set(['select', 'multi_select', 'boolean', 'radio'])
+// A priceable tier coming from the admin matrix (price stripped server-side).
+interface TierTemplate {
+  quantity: number
+  max_completion_minutes: number | null
+  city_id: string | null
+  city_name: string | null
+  option_value_ids: string[]
+}
+
+// A tier rendered in the editor: fixed structure + the printer's editable price.
+interface TierRow extends TierTemplate {
+  price: string
+  completion: string
+  optionLabels: string[]
+}
+
+function sameOptionSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false
+  const sa = [...a].sort()
+  const sb = [...b].sort()
+  return sa.every((id, i) => id === sb[i])
+}
 
 export default function PricingPage() {
-  const { products } = useBootstrap()
-  const offered = (products ?? []).filter((p) => p.selected)
+  const [catalog, setCatalog] = useState<CatalogProduct[]>([])
+  // Products added locally this session but not yet persisted (no printer_pricing yet).
+  const [localAdded, setLocalAdded] = useState<CatalogProduct[]>([])
 
   const [productId, setProductId] = useState('')
-  const [options, setOptions] = useState<ProductOption[]>([])
-  const [cities, setCities] = useState<City[]>([])
-  const [rows, setRows] = useState<PricingRow[]>([])
+  const [tiers, setTiers] = useState<TierRow[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    api.get<{ items: City[] }>('/printer/cities/all')
-      .then((res) => setCities(res.items ?? []))
-      .catch(() => {})
+  // Add-product picker
+  const [pickerOpen, setPickerOpen] = useState(false)
+
+  const loadCatalog = useCallback(async () => {
+    try {
+      const res = await api.get<{ items: CatalogProduct[] }>('/printer/products')
+      setCatalog(res.items ?? [])
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to load products')
+    }
   }, [])
+
+  useEffect(() => {
+    loadCatalog()
+  }, [loadCatalog])
+
+  // Products the printer offers (persisted) plus any added this session.
+  const myProducts = [
+    ...catalog.filter((p) => p.selected),
+    ...localAdded.filter((p) => !catalog.some((c) => c.id === p.id && c.selected)),
+  ]
+  // Catalog items not yet offered and not added locally — available to add.
+  const addable = catalog.filter(
+    (p) => !p.selected && !localAdded.some((l) => l.id === p.id),
+  )
 
   const loadProduct = useCallback(async (pid: string) => {
     setLoading(true)
     try {
-      // Only the OPTION CONFIG is read here — the admin/customer price is never requested.
-      const prod = await api.get<{ data: { options: ProductOption[] } }>(`/printer/products/${pid}`)
-      const opts = (prod.data.options ?? []).filter((o) => OPTION_TYPES.has(o.field_type))
-      setOptions(opts)
+      // Only the OPTION CONFIG (for labels) and the tier TEMPLATE are read here —
+      // the admin/customer price is never requested.
+      const [prod, tpl, existing] = await Promise.all([
+        api.get<{ data: { options: ProductOption[] } }>(`/printer/products/${pid}`),
+        api.get<{ data: { items: TierTemplate[] } }>(`/printer/pricing/template?product_id=${pid}`),
+        api.get<{ data: { items: any[] } }>(`/printer/pricing?product_id=${pid}`),
+      ])
 
-      const existing = await api.get<{ data: { items: any[] } }>(`/printer/pricing?product_id=${pid}`)
-      const loaded: PricingRow[] = (existing.data?.items ?? []).map((r) => {
-        const optionMap: Record<string, string> = {}
-        for (const opt of opts) {
-          const match = opt.values.find((v) => r.option_value_ids.includes(v.field_option_value_id))
-          if (match) optionMap[opt.field_definition_id] = match.field_option_value_id
-        }
+      const options = prod.data.options ?? []
+      // field_option_value_id -> "Label: Value" for readable tier display
+      const valueLabel = new Map<string, string>()
+      for (const opt of options) {
+        for (const v of opt.values) valueLabel.set(v.field_option_value_id, `${opt.label}: ${v.value}`)
+      }
+
+      const saved = existing.data?.items ?? []
+      const rows: TierRow[] = (tpl.data?.items ?? []).map((t) => {
+        const match = saved.find(
+          (s) =>
+            s.quantity === t.quantity &&
+            (s.city_id ?? null) === (t.city_id ?? null) &&
+            sameOptionSet(s.option_value_ids ?? [], t.option_value_ids),
+        )
         return {
-          quantity: String(r.quantity),
-          price: String(r.price),
-          max_completion_minutes: r.max_completion_minutes != null ? String(r.max_completion_minutes) : '',
-          city_id: r.city_id ?? null,
-          options: optionMap,
+          ...t,
+          price: match ? String(match.price) : '',
+          completion:
+            match?.max_completion_minutes != null
+              ? String(match.max_completion_minutes)
+              : t.max_completion_minutes != null
+                ? String(t.max_completion_minutes)
+                : '',
+          optionLabels: t.option_value_ids.map((id) => valueLabel.get(id) ?? id),
         }
       })
-      setRows(loaded)
+      setTiers(rows)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to load product')
     } finally {
@@ -82,23 +137,18 @@ export default function PricingPage() {
   function selectProduct(pid: string | null) {
     const id = pid ?? ''
     setProductId(id)
-    setRows([])
-    setOptions([])
+    setTiers([])
     if (id) loadProduct(id)
   }
 
-  function addRow() {
-    const defaults: Record<string, string> = {}
-    for (const o of options) defaults[o.field_definition_id] = o.values[0]?.field_option_value_id ?? ''
-    setRows((prev) => [...prev, { quantity: '', price: '', max_completion_minutes: '', city_id: null, options: defaults }])
+  function addProduct(p: CatalogProduct) {
+    setLocalAdded((prev) => (prev.some((l) => l.id === p.id) ? prev : [...prev, p]))
+    setPickerOpen(false)
+    selectProduct(p.id)
   }
 
-  function updateRow(i: number, patch: Partial<PricingRow>) {
-    setRows((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)))
-  }
-
-  function setRowOption(i: number, fieldDefId: string, valueId: string) {
-    setRows((prev) => prev.map((r, j) => (j === i ? { ...r, options: { ...r.options, [fieldDefId]: valueId } } : r)))
+  function updateTier(i: number, patch: Partial<Pick<TierRow, 'price' | 'completion'>>) {
+    setTiers((prev) => prev.map((r, j) => (j === i ? { ...r, ...patch } : r)))
   }
 
   async function save() {
@@ -106,18 +156,20 @@ export default function PricingPage() {
     try {
       const payload = {
         product_id: productId,
-        rows: rows
-          .filter((r) => r.quantity && r.price)
-          .map((r) => ({
-            quantity: Number(r.quantity),
-            price: Number(r.price),
-            max_completion_minutes: r.max_completion_minutes ? Number(r.max_completion_minutes) : null,
-            city_id: r.city_id,
-            option_value_ids: Object.values(r.options).filter(Boolean),
+        rows: tiers
+          .filter((t) => t.price !== '')
+          .map((t) => ({
+            quantity: t.quantity,
+            price: Number(t.price),
+            max_completion_minutes: t.completion ? Number(t.completion) : null,
+            city_id: t.city_id,
+            option_value_ids: t.option_value_ids,
           })),
       }
       await api.post('/printer/pricing', payload)
       toast.success('Your pricing has been saved')
+      // Refresh catalog so the now-enrolled product reflects `selected: true`.
+      await loadCatalog()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to save pricing')
     } finally {
@@ -130,105 +182,108 @@ export default function PricingPage() {
       <div>
         <h1 className="text-2xl font-bold">My Pricing</h1>
         <p className="text-sm text-muted-foreground">
-          Set the price you charge us per product, options and quantity. These are your own rates.
+          Set the price you charge us for each tier of a product. These are your own rates.
         </p>
       </div>
 
-      <div className="max-w-sm">
-        <Label className="text-xs">Product</Label>
-        <Select value={productId} onValueChange={selectProduct}>
-          <SelectTrigger className="mt-1">
-            <SelectValue placeholder="Select a product you offer" />
-          </SelectTrigger>
-          <SelectContent>
-            {offered.map((p) => (
-              <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex items-end gap-2">
+        <div className="max-w-sm flex-1">
+          <Label className="text-xs">Product</Label>
+          <Select value={productId} onValueChange={selectProduct}>
+            <SelectTrigger className="mt-1">
+              <SelectValue placeholder="Select one of your products" />
+            </SelectTrigger>
+            <SelectContent>
+              {myProducts.map((p) => (
+                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <Button variant="outline" onClick={() => setPickerOpen(true)}>
+          <Plus className="h-4 w-4 mr-1" /> Add product
+        </Button>
       </div>
 
       {loading ? (
         <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-12 rounded-lg" />)}
+          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-14 rounded-lg" />)}
         </div>
       ) : productId ? (
-        <>
-          <div className="space-y-2">
-            {rows.length === 0 && (
-              <p className="text-sm text-muted-foreground">No pricing rows yet. Add one below.</p>
-            )}
-            {rows.map((row, i) => (
-              <div key={i} className="rounded-lg border p-3 space-y-3">
-                <div className="flex flex-wrap gap-3">
-                  {options.map((opt) => (
-                    <div key={opt.field_definition_id} className="min-w-[140px]">
-                      <Label className="text-xs">{opt.label}</Label>
-                      <Select
-                        value={row.options[opt.field_definition_id] ?? ''}
-                        onValueChange={(v) => setRowOption(i, opt.field_definition_id, v ?? '')}
-                      >
-                        <SelectTrigger className="mt-1 h-9 text-sm">
-                          <SelectValue placeholder={opt.label} />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {opt.values.map((v) => (
-                            <SelectItem key={v.field_option_value_id} value={v.field_option_value_id}>{v.value}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+        tiers.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Pricing for this product hasn&apos;t been configured yet, so there are no tiers to price.
+          </p>
+        ) : (
+          <>
+            <div className="space-y-2">
+              {tiers.map((tier, i) => (
+                <div key={i} className="flex flex-wrap items-end gap-3 rounded-lg border p-3">
+                  <div className="flex-1 min-w-[200px] space-y-1">
+                    <div className="flex flex-wrap gap-1.5">
+                      {tier.optionLabels.map((lbl, k) => (
+                        <span key={k} className="rounded bg-muted px-1.5 py-0.5 text-xs text-foreground">
+                          {lbl}
+                        </span>
+                      ))}
                     </div>
-                  ))}
-                  <div className="min-w-[140px]">
-                    <Label className="text-xs">City</Label>
-                    <Select
-                      value={row.city_id ?? '__all__'}
-                      onValueChange={(v) => updateRow(i, { city_id: v === '__all__' ? null : v })}
-                    >
-                      <SelectTrigger className="mt-1 h-9 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All Cities</SelectItem>
-                        {cities.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-end gap-3">
-                  <div className="w-28">
-                    <Label className="text-xs">Quantity</Label>
-                    <Input type="number" min={1} value={row.quantity} className="h-9 mt-1"
-                      onChange={(e) => updateRow(i, { quantity: e.target.value })} />
+                    <p className="text-xs text-muted-foreground">
+                      Qty {tier.quantity} · {tier.city_name ?? 'All Cities'}
+                    </p>
                   </div>
                   <div className="w-32">
                     <Label className="text-xs">Your price (₹)</Label>
-                    <Input type="number" min={0} step={0.01} value={row.price} className="h-9 mt-1"
-                      onChange={(e) => updateRow(i, { price: e.target.value })} />
+                    <Input type="number" min={0} step={0.01} value={tier.price} className="h-9 mt-1"
+                      onChange={(e) => updateTier(i, { price: e.target.value })} />
                   </div>
                   <div className="w-36">
                     <Label className="text-xs">Completion (min)</Label>
-                    <Input type="number" min={0} value={row.max_completion_minutes} className="h-9 mt-1" placeholder="Optional"
-                      onChange={(e) => updateRow(i, { max_completion_minutes: e.target.value })} />
+                    <Input type="number" min={0} value={tier.completion} className="h-9 mt-1" placeholder="Optional"
+                      onChange={(e) => updateTier(i, { completion: e.target.value })} />
                   </div>
-                  <Button variant="ghost" size="icon" className="h-9 w-9"
-                    onClick={() => setRows((prev) => prev.filter((_, j) => j !== i))}>
-                    <Trash2 className="h-4 w-4 text-destructive" />
-                  </Button>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
 
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={addRow}>
-              <Plus className="h-4 w-4 mr-1" /> Add pricing row
-            </Button>
-            <Button size="sm" onClick={save} disabled={saving || rows.length === 0}>
-              {saving ? 'Saving…' : 'Save pricing'}
-            </Button>
-          </div>
-        </>
+            <div className="flex gap-2">
+              <Button size="sm" onClick={save} disabled={saving}>
+                {saving ? 'Saving…' : 'Save pricing'}
+              </Button>
+            </div>
+          </>
+        )
       ) : null}
+
+      {/* Add product picker */}
+      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add a product</DialogTitle>
+            <DialogDescription>
+              Pick a catalog product to set your own prices for. It is added to the products you offer when you save pricing.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[60vh] overflow-y-auto space-y-2">
+            {addable.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4 text-center">
+                No more catalog products to add.
+              </p>
+            ) : (
+              addable.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  onClick={() => addProduct(p)}
+                  className="flex w-full items-center justify-between rounded-lg border px-4 py-3 text-left hover:bg-muted/40 transition-colors"
+                >
+                  <span className="text-sm font-medium">{p.name}</span>
+                  <Plus className="h-4 w-4 text-muted-foreground" />
+                </button>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

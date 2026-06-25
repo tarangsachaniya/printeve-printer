@@ -89,7 +89,7 @@ export default function AvailableOrdersPage() {
     setAccepting(orderId)
     try {
       await api.post(`/printer/available-orders/${orderId}/accept`, {})
-      toast.success('Order accepted! Customer details are now available in My Jobs.')
+      toast.success('Order accepted — find it in My Jobs.')
       setOrders((prev) => prev.filter((o) => o.orderId !== orderId))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not accept order')
