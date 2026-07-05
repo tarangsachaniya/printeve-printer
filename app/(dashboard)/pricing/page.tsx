@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
 } from '@/components/ui/dialog'
@@ -189,16 +189,23 @@ export default function PricingPage() {
       <div className="flex items-end gap-2">
         <div className="max-w-sm flex-1">
           <Label className="text-xs">Product</Label>
-          <Select value={productId} onValueChange={selectProduct}>
-            <SelectTrigger className="mt-1">
-              <SelectValue placeholder="Select one of your products" />
-            </SelectTrigger>
-            <SelectContent>
-              {myProducts.map((p) => (
-                <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {(() => {
+            const selectedProductName = myProducts.find(p => p.id === productId)?.name
+            return (
+              <Select value={productId} onValueChange={selectProduct}>
+                <SelectTrigger className="mt-1">
+                  <span className={selectedProductName ? '' : 'text-muted-foreground'}>
+                    {selectedProductName ?? 'Select one of your products'}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  {myProducts.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )
+          })()}
         </div>
         <Button variant="outline" onClick={() => setPickerOpen(true)}>
           <Plus className="h-4 w-4 mr-1" /> Add product
