@@ -75,7 +75,7 @@ export default function LoginPage() {
           <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-foreground/15">
             <Printer className="h-5 w-5" />
           </div>
-          <span className="text-lg 2xl:text-xl font-semibold tracking-tight">PrintEve Printer</span>
+          <span className="text-lg 2xl:text-xl font-semibold tracking-tight">Priinteve Printer</span>
         </div>
 
         {/* Illustration */}
@@ -109,7 +109,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-primary-foreground/60 text-xs 2xl:text-sm">
-          © {new Date().getFullYear()} PrintEve. All rights reserved.
+          © {new Date().getFullYear()} Priinteve. All rights reserved.
         </p>
       </div>
 
@@ -177,7 +177,7 @@ export default function LoginPage() {
           </form>
 
           <p className="mt-6 xl:mt-8 text-center lg:text-left text-[clamp(0.75rem,1.4vw,1rem)] text-muted-foreground">
-            New here? Reach out to PrintEve to get your printer account set up.
+            New here? Reach out to Priinteve to get your printer account set up.
           </p>
         </div>
       </div>
