@@ -109,7 +109,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-primary-foreground/60 text-xs 2xl:text-sm">
-          © {new Date().getFullYear()} Priinteve. All rights reserved.
+          © {new Date().getFullYear()} Priinteve Innovations. All rights reserved.
         </p>
       </div>
 
