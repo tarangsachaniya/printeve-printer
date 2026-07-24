@@ -52,7 +52,14 @@ const STATUS_VARIANT: Record<string, 'default' | 'secondary' | 'outline' | 'dest
   delivered: 'default', cancelled: 'destructive',
 }
 
-const JOB_STATUSES = ['printing', 'out_for_delivery', 'delivered', 'cancelled']
+// Mirrors OrderService's PRINTER_ALLOWED_TRANSITIONS in printvana-api — printers
+// may only move an order forward through print/delivery; 'cancelled' is admin-only.
+const PRINTER_ALLOWED_TRANSITIONS: Record<string, string[]> = {
+  assigned: ['printing'],
+  confirmed: ['printing'],
+  printing: ['out_for_delivery'],
+  out_for_delivery: ['delivered'],
+}
 
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>()
@@ -73,7 +80,7 @@ export default function JobDetailPage() {
     ])
       .then(([res, filesRes]) => {
         setJob(res.data)
-        setNewStatus(res.data.status)
+        setNewStatus(PRINTER_ALLOWED_TRANSITIONS[res.data.status]?.[0] ?? '')
         if (filesRes) setFiles(filesRes.data.history ?? [])
       })
       .catch((err) => setError(err.message ?? 'Failed to load job'))
@@ -86,6 +93,7 @@ export default function JobDetailPage() {
     try {
       await api.patch(`/printer/status/${id}`, { status: newStatus })
       setJob((prev) => (prev ? { ...prev, status: newStatus } : prev))
+      setNewStatus(PRINTER_ALLOWED_TRANSITIONS[newStatus]?.[0] ?? '')
       toast.success('Status updated')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Update failed')
@@ -112,6 +120,8 @@ export default function JobDetailPage() {
       </div>
     )
   }
+
+  const availableStatuses = PRINTER_ALLOWED_TRANSITIONS[job.status] ?? []
 
   return (
     <div className="p-6 space-y-6 max-w-3xl">
@@ -176,20 +186,24 @@ export default function JobDetailPage() {
       <Card>
         <CardHeader><CardTitle>Update Status</CardTitle></CardHeader>
         <CardContent>
-          <form onSubmit={handleUpdateStatus} className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="status">New Status</Label>
-              <Select value={newStatus} onValueChange={(v) => setNewStatus(v ?? '')}>
-                <SelectTrigger id="status" className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
-                <SelectContent>
-                  {JOB_STATUSES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button type="submit" disabled={updating || newStatus === job.status}>
-              {updating ? 'Updating…' : 'Update Status'}
-            </Button>
-          </form>
+          {availableStatuses.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No further status updates available for this order.</p>
+          ) : (
+            <form onSubmit={handleUpdateStatus} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="status">New Status</Label>
+                <Select value={newStatus} onValueChange={(v) => setNewStatus(v ?? '')}>
+                  <SelectTrigger id="status" className="w-full"><SelectValue placeholder="Select status" /></SelectTrigger>
+                  <SelectContent>
+                    {availableStatuses.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button type="submit" disabled={updating || !newStatus || newStatus === job.status}>
+                {updating ? 'Updating…' : 'Update Status'}
+              </Button>
+            </form>
+          )}
         </CardContent>
       </Card>
     </div>
