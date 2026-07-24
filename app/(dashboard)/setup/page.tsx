@@ -17,11 +17,12 @@ const UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET ?? ''
 
 async function uploadSignatureToCloudinary(canvas: HTMLCanvasElement, name: string): Promise<string> {
   const safeName = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'signature'
+  // Store the signature as WebP (higher quality so the line art stays crisp).
   const blob = await new Promise<Blob>((resolve, reject) =>
-    canvas.toBlob(b => b ? resolve(b) : reject(new Error('Canvas export failed')), 'image/png')
+    canvas.toBlob(b => b ? resolve(b) : reject(new Error('Canvas export failed')), 'image/webp', 0.92)
   )
   const fd = new FormData()
-  fd.append('file', blob, `${safeName}.png`)
+  fd.append('file', blob, `${safeName}.webp`)
   fd.append('upload_preset', UPLOAD_PRESET)
   fd.append('folder', 'signatures')
   fd.append('public_id', safeName)
